@@ -1,6 +1,6 @@
 # Life Dashboard
 
-Personal life-logging dashboard aggregating external apps (Todoist, Strava, Apple Health, Apple Calendar, Obsidian). Single user (Sienna). External apps stay the source of truth — we pull read-only by default and write back only where the API is good.
+Personal life-logging dashboard aggregating external apps (Things 3, Strava, Apple Health, Apple Calendar, Obsidian). Single user (Sienna). External apps stay the source of truth — we pull read-only by default and write back only where the API is good. Things has NO public API: data arrives via an iOS Shortcut on Sienna's iPhone that POSTs to `/webhooks/things` (same push pattern as Health Auto Export).
 
 ## Commands
 

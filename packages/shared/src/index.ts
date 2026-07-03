@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SOURCES = ["todoist", "strava", "health", "calendar", "vault"] as const;
+export const SOURCES = ["things", "strava", "health", "calendar", "vault"] as const;
 export const sourceSchema = z.enum(SOURCES);
 export type Source = z.infer<typeof sourceSchema>;
 

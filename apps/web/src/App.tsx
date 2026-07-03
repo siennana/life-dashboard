@@ -28,7 +28,7 @@ export default function App() {
           )}
           {status.isSuccess && status.data.sources.length === 0 && (
             <p className="mt-3 text-zinc-400">
-              API connected. No sources synced yet — Phase 1 adds Todoist.
+              API connected. No sources synced yet — Phase 1 adds Things.
             </p>
           )}
           {status.isSuccess && status.data.sources.length > 0 && (
