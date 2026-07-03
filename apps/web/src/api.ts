@@ -19,3 +19,11 @@ export type TodoRow = {
 };
 
 export const getTodos = () => apiFetch<{ todos: TodoRow[] }>("/api/todos");
+
+export async function closeTodo(externalId: string): Promise<void> {
+  const res = await fetch(`/api/todos/${externalId}/close`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}` },
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+}

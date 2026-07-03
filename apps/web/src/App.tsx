@@ -1,9 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
-import { getStatus, getTodos } from "./api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { closeTodo, getStatus, getTodos } from "./api";
 
 export default function App() {
+  const queryClient = useQueryClient();
   const status = useQuery({ queryKey: ["status"], queryFn: getStatus });
   const todos = useQuery({ queryKey: ["todos"], queryFn: getTodos });
+  const complete = useMutation({
+    mutationFn: closeTodo,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
+  });
   const openTodos = todos.data?.todos.filter((t) => t.payload?.status !== "completed") ?? [];
 
   return (
@@ -22,16 +27,23 @@ export default function App() {
           <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Todos</h2>
           {todos.isSuccess && openTodos.length === 0 && (
             <p className="mt-3 text-zinc-400">
-              Nothing here yet — run the Things shortcut on your phone to push todos.
+              All clear — add todos in Todoist and they'll appear within 5 minutes.
             </p>
           )}
           {openTodos.length > 0 && (
             <ul className="mt-3 space-y-2">
               {openTodos.map((t) => (
-                <li key={t.externalId} className="flex items-center justify-between text-sm">
-                  <span>{t.title}</span>
+                <li key={t.externalId} className="flex items-center gap-3 text-sm">
+                  <button
+                    type="button"
+                    aria-label={`Complete ${t.title}`}
+                    disabled={complete.isPending}
+                    onClick={() => complete.mutate(t.externalId)}
+                    className="h-4 w-4 shrink-0 rounded-full border border-zinc-600 hover:border-emerald-400 hover:bg-emerald-400/20 disabled:opacity-50"
+                  />
+                  <span className="flex-1">{t.title}</span>
                   {t.payload?.list && (
-                    <span className="ml-3 shrink-0 text-xs text-zinc-500">{t.payload.list}</span>
+                    <span className="shrink-0 text-xs text-zinc-500">{t.payload.list}</span>
                   )}
                 </li>
               ))}

@@ -3,7 +3,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { createDb, events } from "@life/db";
 import { config } from "./config";
-import { ingestThingsPush } from "./connectors/things";
+import { closeTodoistTask, syncTodoist } from "./connectors/todoist";
 
 const app = Fastify({ logger: true });
 const db = createDb(config.databaseUrl);
@@ -36,19 +36,22 @@ app.get("/api/todos", async () => {
   const todos = await db
     .select()
     .from(events)
-    .where(and(eq(events.source, "things"), eq(events.type, "todo")))
+    .where(and(eq(events.source, "todoist"), eq(events.type, "todo")))
     .orderBy(asc(events.startTs));
   return { todos };
 });
 
-app.post("/webhooks/things", async (req, reply) => {
-  if (!config.thingsWebhookSecret) {
-    return reply.code(503).send({ error: "THINGS_WEBHOOK_SECRET not configured" });
+app.post("/api/todos/:externalId/close", async (req, reply) => {
+  if (!config.todoistApiToken) {
+    return reply.code(503).send({ error: "TODOIST_API_TOKEN not configured" });
   }
-  if (req.headers["x-webhook-secret"] !== config.thingsWebhookSecret) {
-    return reply.code(401).send({ error: "unauthorized" });
-  }
-  return ingestThingsPush(db, req.body);
+  const { externalId } = req.params as { externalId: string };
+  return closeTodoistTask(db, config.todoistApiToken, externalId);
+});
+
+app.post("/api/sync", async () => {
+  if (!config.todoistApiToken) return { skipped: "todoist not configured" };
+  return syncTodoist(db, config.todoistApiToken);
 });
 
 app.setErrorHandler((err, _req, reply) => {
@@ -63,3 +66,20 @@ app.listen({ port: config.port, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);
   process.exit(1);
 });
+
+// Pull-based connectors: sync on boot, then every 5 minutes.
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+let syncing = false;
+async function runSyncs() {
+  if (syncing || !config.todoistApiToken) return;
+  syncing = true;
+  try {
+    await syncTodoist(db, config.todoistApiToken);
+  } catch (err) {
+    app.log.error({ err }, "todoist sync failed");
+  } finally {
+    syncing = false;
+  }
+}
+void runSyncs();
+setInterval(runSyncs, SYNC_INTERVAL_MS);

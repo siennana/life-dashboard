@@ -11,7 +11,7 @@ const envSchema = z.object({
   API_TOKEN: z.string().min(16, "API_TOKEN must be at least 16 chars — generate with: openssl rand -hex 24"),
   PORT: z.coerce.number().default(3001),
   VAULT_PATH: z.string().optional(),
-  THINGS_WEBHOOK_SECRET: z.string().min(16).optional(),
+  TODOIST_API_TOKEN: z.string().min(16).optional(),
 });
 
 const env = envSchema.parse(process.env);
@@ -21,5 +21,5 @@ export const config = {
   apiToken: env.API_TOKEN,
   port: env.PORT,
   vaultPath: env.VAULT_PATH,
-  thingsWebhookSecret: env.THINGS_WEBHOOK_SECRET,
+  todoistApiToken: env.TODOIST_API_TOKEN,
 };
