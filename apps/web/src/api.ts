@@ -9,3 +9,13 @@ export async function apiFetch<T>(path: string): Promise<T> {
 }
 
 export const getStatus = () => apiFetch<StatusResponse>("/api/status");
+
+export type TodoRow = {
+  id: number;
+  externalId: string;
+  title: string | null;
+  startTs: string;
+  payload: { status?: string; list?: string | null; notes?: string | null } | null;
+};
+
+export const getTodos = () => apiFetch<{ todos: TodoRow[] }>("/api/todos");

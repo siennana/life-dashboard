@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { getStatus } from "./api";
+import { getStatus, getTodos } from "./api";
 
 export default function App() {
   const status = useQuery({ queryKey: ["status"], queryFn: getStatus });
+  const todos = useQuery({ queryKey: ["todos"], queryFn: getTodos });
+  const openTodos = todos.data?.todos.filter((t) => t.payload?.status !== "completed") ?? [];
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -17,6 +19,27 @@ export default function App() {
         </p>
 
         <section className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Todos</h2>
+          {todos.isSuccess && openTodos.length === 0 && (
+            <p className="mt-3 text-zinc-400">
+              Nothing here yet — run the Things shortcut on your phone to push todos.
+            </p>
+          )}
+          {openTodos.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {openTodos.map((t) => (
+                <li key={t.externalId} className="flex items-center justify-between text-sm">
+                  <span>{t.title}</span>
+                  {t.payload?.list && (
+                    <span className="ml-3 shrink-0 text-xs text-zinc-500">{t.payload.list}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
           <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
             Sync status
           </h2>
