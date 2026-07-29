@@ -1,0 +1,182 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import type { PortfolioResponse } from "@life/shared";
+import { getPortfolio, uploadHoldings } from "../api";
+
+const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
+
+const money = (n: number | null) => (n == null ? "—" : usd.format(n));
+const qty = (n: number | null) =>
+  n == null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+const pct = (n: number | null) =>
+  n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+
+const gainColor = (n: number | null) =>
+  n == null ? "text-zinc-400" : n > 0 ? "text-emerald-400" : n < 0 ? "text-red-400" : "text-zinc-300";
+
+function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className={`mt-1 text-lg font-semibold ${tone ?? "text-zinc-100"}`}>{value}</div>
+    </div>
+  );
+}
+
+function Totals({ totals }: { totals: PortfolioResponse["totals"] }) {
+  return (
+    <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <Stat label="Market value" value={money(totals.marketValue)} />
+      <Stat label="Cost basis" value={money(totals.costBasis)} />
+      <Stat
+        label="Total gain"
+        value={`${money(totals.totalGain)} (${pct(totals.totalGainPct)})`}
+        tone={gainColor(totals.totalGain)}
+      />
+      <Stat label="Today" value={money(totals.dayGain)} tone={gainColor(totals.dayGain)} />
+    </div>
+  );
+}
+
+function Uploader() {
+  const queryClient = useQueryClient();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const upload = useMutation({
+    mutationFn: uploadHoldings,
+    onSuccess: (res) => {
+      setNote(`Imported ${res.imported} holdings${res.skipped ? `, skipped ${res.skipped} rows` : ""}.`);
+      queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+    },
+    onError: (err) => setNote((err as Error).message),
+  });
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    upload.mutate(text);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  return (
+    <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+      <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
+        Upload Fidelity CSV
+      </h2>
+      <p className="mt-2 text-sm text-zinc-400">
+        Export your positions from Fidelity and upload the CSV. We read the Symbol, Quantity, and
+        Cost Basis columns; re-uploading replaces your holdings.
+      </p>
+      <div className="mt-3 flex items-center gap-3">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv,text/csv"
+          onChange={onFile}
+          disabled={upload.isPending}
+          className="block w-full text-sm text-zinc-400 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-4 file:py-2 file:text-sm file:text-zinc-100 hover:file:bg-zinc-700 disabled:opacity-50"
+        />
+      </div>
+      {upload.isPending && <p className="mt-3 text-sm text-zinc-400">Importing…</p>}
+      {note && !upload.isPending && (
+        <p className={`mt-3 text-sm ${upload.isError ? "text-red-400" : "text-emerald-400"}`}>
+          {note}
+        </p>
+      )}
+    </section>
+  );
+}
+
+export function Finance() {
+  const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: getPortfolio });
+  const positions = portfolio.data?.positions ?? [];
+
+  return (
+    <>
+      <h1 className="text-2xl font-semibold">Finance</h1>
+      <p className="mt-1 text-sm text-zinc-400">Portfolio performance from your Fidelity holdings.</p>
+
+      <Uploader />
+
+      {portfolio.data && !portfolio.data.quotesConfigured && positions.length > 0 && (
+        <p className="mt-6 rounded-lg border border-amber-900/50 bg-amber-950/30 p-3 text-sm text-amber-300">
+          Live prices are off — set <code>FINNHUB_API_KEY</code> in <code>.env</code> to see current
+          value and today's change.
+        </p>
+      )}
+
+      <section className="mt-6">
+        {portfolio.isPending && <p className="text-zinc-400">Loading…</p>}
+        {portfolio.isError && (
+          <p className="text-red-400">
+            Couldn't load portfolio — {(portfolio.error as Error).message}
+          </p>
+        )}
+        {portfolio.isSuccess && positions.length === 0 && (
+          <p className="text-zinc-400">No holdings yet — upload a Fidelity CSV above to get started.</p>
+        )}
+
+        {positions.length > 0 && portfolio.data && (
+          <>
+            <Totals totals={portfolio.data.totals} />
+            {portfolio.data.pricedAt && (
+              <p className="mt-3 text-xs text-zinc-500">
+                Priced {new Date(portfolio.data.pricedAt).toLocaleTimeString()}
+              </p>
+            )}
+            <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
+                    <th className="px-4 py-3 font-medium">Symbol</th>
+                    <th className="px-4 py-3 text-right font-medium">Qty</th>
+                    <th className="px-4 py-3 text-right font-medium">Price</th>
+                    <th className="px-4 py-3 text-right font-medium">Today</th>
+                    <th className="px-4 py-3 text-right font-medium">Value</th>
+                    <th className="px-4 py-3 text-right font-medium">Cost basis</th>
+                    <th className="px-4 py-3 text-right font-medium">Total gain</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {positions.map((p) => (
+                    <tr key={p.symbol} className="border-b border-zinc-800/50 last:border-0">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-zinc-100">{p.symbol}</div>
+                        {p.description && (
+                          <div className="max-w-[16rem] truncate text-xs text-zinc-500">
+                            {p.description}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
+                        {qty(p.quantity)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
+                        {money(p.price)}
+                      </td>
+                      <td className={`px-4 py-3 text-right tabular-nums ${gainColor(p.dayChangePct)}`}>
+                        {pct(p.dayChangePct)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-zinc-100">
+                        {money(p.marketValue)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
+                        {money(p.costBasis)}
+                      </td>
+                      <td className={`px-4 py-3 text-right tabular-nums ${gainColor(p.totalGain)}`}>
+                        {money(p.totalGain)}
+                        <span className="ml-1 text-xs">({pct(p.totalGainPct)})</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+    </>
+  );
+}

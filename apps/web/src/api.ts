@@ -1,10 +1,15 @@
-import type { StatusResponse } from "@life/shared";
+import type { PortfolioResponse, StatusResponse, UploadResponse } from "@life/shared";
+
+async function errorMessage(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as { error?: string } | null;
+  return body?.error ?? `API ${res.status}: ${res.statusText}`;
+}
 
 export async function apiFetch<T>(path: string): Promise<T> {
   const res = await fetch(path, {
     headers: { Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}` },
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  if (!res.ok) throw new Error(await errorMessage(res));
   return res.json() as Promise<T>;
 }
 
@@ -25,5 +30,20 @@ export async function closeTodo(externalId: string): Promise<void> {
     method: "POST",
     headers: { Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}` },
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  if (!res.ok) throw new Error(await errorMessage(res));
+}
+
+export const getPortfolio = () => apiFetch<PortfolioResponse>("/api/finance/portfolio");
+
+export async function uploadHoldings(csv: string): Promise<UploadResponse> {
+  const res = await fetch("/api/finance/holdings/upload", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "text/csv",
+    },
+    body: csv,
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<UploadResponse>;
 }
