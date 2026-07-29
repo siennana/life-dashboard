@@ -1,84 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { closeTodo, getStatus, getTodos } from "./api";
+import { Outlet } from "react-router-dom";
+import { SideNav } from "./components/SideNav";
 
 export default function App() {
-  const queryClient = useQueryClient();
-  const status = useQuery({ queryKey: ["status"], queryFn: getStatus });
-  const todos = useQuery({ queryKey: ["todos"], queryFn: getTodos });
-  const complete = useMutation({
-    mutationFn: closeTodo,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
-  });
-  const openTodos = todos.data?.todos.filter((t) => t.payload?.status !== "completed") ?? [];
-
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <main className="mx-auto max-w-3xl px-4 py-10">
-        <h1 className="text-2xl font-semibold">Life Dashboard</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          {new Date().toLocaleDateString(undefined, {
-            weekday: "long",
-            month: "long",
-            day: "numeric",
-          })}
-        </p>
-
-        <section className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Todos</h2>
-          {todos.isSuccess && openTodos.length === 0 && (
-            <p className="mt-3 text-zinc-400">
-              All clear — add todos in Todoist and they'll appear within 5 minutes.
-            </p>
-          )}
-          {openTodos.length > 0 && (
-            <ul className="mt-3 space-y-2">
-              {openTodos.map((t) => (
-                <li key={t.externalId} className="flex items-center gap-3 text-sm">
-                  <button
-                    type="button"
-                    aria-label={`Complete ${t.title}`}
-                    disabled={complete.isPending}
-                    onClick={() => complete.mutate(t.externalId)}
-                    className="h-4 w-4 shrink-0 rounded-full border border-zinc-600 hover:border-emerald-400 hover:bg-emerald-400/20 disabled:opacity-50"
-                  />
-                  <span className="flex-1">{t.title}</span>
-                  {t.payload?.list && (
-                    <span className="shrink-0 text-xs text-zinc-500">{t.payload.list}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
-            Sync status
-          </h2>
-          {status.isPending && <p className="mt-3 text-zinc-400">Connecting…</p>}
-          {status.isError && (
-            <p className="mt-3 text-red-400">
-              Cannot reach API — {(status.error as Error).message}
-            </p>
-          )}
-          {status.isSuccess && status.data.sources.length === 0 && (
-            <p className="mt-3 text-zinc-400">
-              API connected. No sources synced yet — Phase 1 adds Things.
-            </p>
-          )}
-          {status.isSuccess && status.data.sources.length > 0 && (
-            <ul className="mt-3 space-y-2">
-              {status.data.sources.map((s) => (
-                <li key={s.source} className="flex items-center justify-between text-sm">
-                  <span className="capitalize">{s.source}</span>
-                  <span className={s.status === "error" ? "text-red-400" : "text-emerald-400"}>
-                    {s.status}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+    <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
+      <SideNav />
+      <main className="flex-1 px-6 py-10">
+        <div className="mx-auto max-w-3xl">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

@@ -6,20 +6,51 @@ import { z } from "zod";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 loadEnv({ path: resolve(repoRoot, ".env") });
 
+// Everything here is optional at the schema level — a missing/invalid value
+// should degrade the affected feature (and surface in /health + API error
+// responses), not crash the process before it can even report why.
 const envSchema = z.object({
-  DATABASE_URL: z.string().min(1),
-  API_TOKEN: z.string().min(16, "API_TOKEN must be at least 16 chars — generate with: openssl rand -hex 24"),
+  DATABASE_URL: z.string().optional(),
+  API_TOKEN: z.string().optional(),
   PORT: z.coerce.number().default(3001),
   VAULT_PATH: z.string().optional(),
-  TODOIST_API_TOKEN: z.string().min(16).optional(),
+  TODOIST_API_TOKEN: z.string().optional(),
+  FINNHUB_API_KEY: z.string().optional(),
 });
 
-const env = envSchema.parse(process.env);
+const parsed = envSchema.safeParse(process.env);
+const env = parsed.success ? parsed.data : envSchema.parse({});
+
+const warnings: string[] = [];
+if (!parsed.success) {
+  warnings.push(`could not parse .env, falling back to defaults (${parsed.error.message})`);
+}
+
+function checkToken(name: string, value: string | undefined, minLen = 16): string | undefined {
+  if (!value) {
+    warnings.push(`${name} is not set`);
+    return undefined;
+  }
+  if (value.length < minLen) {
+    warnings.push(`${name} looks invalid (shorter than ${minLen} chars) — generate with: openssl rand -hex 24`);
+    return undefined;
+  }
+  return value;
+}
+
+const apiToken = checkToken("API_TOKEN", env.API_TOKEN);
+const todoistApiToken = checkToken("TODOIST_API_TOKEN", env.TODOIST_API_TOKEN);
+if (!env.DATABASE_URL) warnings.push("DATABASE_URL is not set");
+if (!env.FINNHUB_API_KEY) warnings.push("FINNHUB_API_KEY is not set — live prices will be unavailable");
+
+for (const w of warnings) console.warn(`[config] ${w}`);
 
 export const config = {
   databaseUrl: env.DATABASE_URL,
-  apiToken: env.API_TOKEN,
+  apiToken,
   port: env.PORT,
   vaultPath: env.VAULT_PATH,
-  todoistApiToken: env.TODOIST_API_TOKEN,
+  todoistApiToken,
+  finnhubApiKey: env.FINNHUB_API_KEY,
+  warnings,
 };
