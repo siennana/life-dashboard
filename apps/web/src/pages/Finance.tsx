@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import type { PortfolioResponse } from "@life/shared";
+import type { PortfolioResponse, RiskTier } from "@life/shared";
 import { getPortfolio, uploadHoldings } from "../api";
 
 const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
@@ -13,6 +13,75 @@ const pct = (n: number | null) =>
 
 const gainColor = (n: number | null) =>
   n == null ? "text-zinc-400" : n > 0 ? "text-emerald-400" : n < 0 ? "text-red-400" : "text-zinc-300";
+
+const TIER_LABEL: Record<RiskTier, string> = {
+  low: "Low",
+  moderate: "Moderate",
+  elevated: "Elevated",
+  high: "High",
+  unknown: "—",
+};
+const TIER_STYLE: Record<RiskTier, string> = {
+  low: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
+  moderate: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
+  elevated: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
+  high: "bg-red-500/15 text-red-300 ring-red-500/30",
+  unknown: "bg-zinc-700/30 text-zinc-500 ring-zinc-600/30",
+};
+
+function RiskBadge({ tier, beta }: { tier: RiskTier; beta: number | null }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ring-1 ${TIER_STYLE[tier]}`}
+    >
+      {TIER_LABEL[tier]}
+      {beta != null && <span className="tabular-nums opacity-70">β{beta.toFixed(2)}</span>}
+    </span>
+  );
+}
+
+function RiskCard({ risk }: { risk: PortfolioResponse["risk"] }) {
+  return (
+    <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Portfolio risk</h2>
+        <RiskBadge tier={risk.rating} beta={risk.portfolioBeta} />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Stat
+          label="Portfolio beta"
+          value={risk.portfolioBeta == null ? "—" : risk.portfolioBeta.toFixed(2)}
+        />
+        <Stat
+          label="Top position"
+          value={
+            risk.topSymbol && risk.topWeightPct != null
+              ? `${risk.topSymbol} · ${risk.topWeightPct.toFixed(0)}%`
+              : "—"
+          }
+        />
+        <Stat
+          label="In volatile holdings"
+          value={risk.highRiskPct == null ? "—" : `${risk.highRiskPct.toFixed(0)}%`}
+        />
+      </div>
+      {risk.notes.length > 0 && (
+        <ul className="mt-4 space-y-1.5 text-sm text-zinc-400">
+          {risk.notes.map((n) => (
+            <li key={n} className="flex gap-2">
+              <span className="text-zinc-600">•</span>
+              <span>{n}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-4 text-xs text-zinc-600">
+        Risk is estimated from each holding's beta (volatility vs. the market) and how concentrated
+        the portfolio is. Not investment advice.
+      </p>
+    </section>
+  );
+}
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
@@ -137,6 +206,7 @@ export function Finance() {
                     <th className="px-4 py-3 text-right font-medium">Value</th>
                     <th className="px-4 py-3 text-right font-medium">Cost basis</th>
                     <th className="px-4 py-3 text-right font-medium">Total gain</th>
+                    <th className="px-4 py-3 text-right font-medium">Risk</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -169,11 +239,15 @@ export function Finance() {
                         {money(p.totalGain)}
                         <span className="ml-1 text-xs">({pct(p.totalGainPct)})</span>
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        <RiskBadge tier={p.riskTier} beta={p.beta} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <RiskCard risk={portfolio.data.risk} />
           </>
         )}
       </section>

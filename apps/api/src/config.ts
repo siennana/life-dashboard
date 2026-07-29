@@ -41,7 +41,7 @@ function checkToken(name: string, value: string | undefined, minLen = 16): strin
 const apiToken = checkToken("API_TOKEN", env.API_TOKEN);
 const todoistApiToken = checkToken("TODOIST_API_TOKEN", env.TODOIST_API_TOKEN);
 if (!env.DATABASE_URL) warnings.push("DATABASE_URL is not set");
-if (!env.FINNHUB_API_KEY) warnings.push("FINNHUB_API_KEY is not set — live prices will be unavailable");
+if (!env.FINNHUB_API_KEY) warnings.push("FINNHUB_API_KEY is not set - live prices will be unavailable");
 
 for (const w of warnings) console.warn(`[config] ${w}`);
 

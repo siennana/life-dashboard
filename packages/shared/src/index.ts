@@ -18,6 +18,12 @@ export const statusResponseSchema = z.object({
 });
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 
+// Risk tiers derived from a holding's beta (volatility vs. the market).
+// "unknown" = no beta available (e.g. money-market / some funds).
+export const RISK_TIERS = ["low", "moderate", "elevated", "high", "unknown"] as const;
+export const riskTierSchema = z.enum(RISK_TIERS);
+export type RiskTier = z.infer<typeof riskTierSchema>;
+
 // Finance — a holding is what the Fidelity CSV gives us (symbol + cost basis,
 // plus quantity when the export includes it). A position is a holding priced
 // with a live quote; nulls mean we have the holding but no quote yet.
@@ -33,8 +39,23 @@ export const positionSchema = z.object({
   totalGain: z.number().nullable(),
   totalGainPct: z.number().nullable(),
   dayGain: z.number().nullable(),
+  beta: z.number().nullable(),
+  riskTier: riskTierSchema,
+  weightPct: z.number().nullable(),
 });
 export type Position = z.infer<typeof positionSchema>;
+
+// Bottom-of-dashboard portfolio-level risk assessment.
+export const portfolioRiskSchema = z.object({
+  rating: riskTierSchema,
+  portfolioBeta: z.number().nullable(),
+  topWeightPct: z.number().nullable(),
+  topSymbol: z.string().nullable(),
+  highRiskPct: z.number().nullable(),
+  pricedHoldings: z.number(),
+  notes: z.array(z.string()),
+});
+export type PortfolioRisk = z.infer<typeof portfolioRiskSchema>;
 
 export const portfolioResponseSchema = z.object({
   positions: z.array(positionSchema),
@@ -45,6 +66,7 @@ export const portfolioResponseSchema = z.object({
     totalGainPct: z.number().nullable(),
     dayGain: z.number().nullable(),
   }),
+  risk: portfolioRiskSchema,
   pricedAt: z.string().nullable(),
   quotesConfigured: z.boolean(),
 });

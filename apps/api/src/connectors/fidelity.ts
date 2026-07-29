@@ -17,7 +17,7 @@ type Holding = {
 function parseMoney(raw: string | undefined): number | null {
   if (raw == null) return null;
   const cleaned = raw.replace(/[$,%\s]/g, "").replace(/[()]/g, "");
-  if (cleaned === "" || /^(n\/?a|--|—)$/i.test(cleaned)) return null;
+  if (cleaned === "" || /^(n\/?a|--)$/i.test(cleaned)) return null;
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 }
@@ -72,7 +72,7 @@ export async function importFidelityCsv(db: Db, csv: string) {
   try {
     const { holdings, skipped } = parseHoldings(csv);
     if (holdings.length === 0) {
-      throw new Error("no holdings found — is this a Fidelity positions CSV with a Symbol column?");
+      throw new Error("no holdings found - is this a Fidelity positions CSV with a Symbol column?");
     }
 
     const now = new Date();

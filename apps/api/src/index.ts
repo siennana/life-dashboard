@@ -78,7 +78,7 @@ app.post("/api/todos/:externalId/close", async (req, reply) => {
 app.post("/api/finance/holdings/upload", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   const csv = typeof req.body === "string" ? req.body : "";
-  if (!csv.trim()) return reply.code(400).send({ error: "empty upload — expected CSV text" });
+  if (!csv.trim()) return reply.code(400).send({ error: "empty upload - expected CSV text" });
   return importFidelityCsv(db, csv);
 });
 
