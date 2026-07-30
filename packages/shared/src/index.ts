@@ -146,3 +146,21 @@ export const booksResponseSchema = z.object({
   books: z.array(bookRowSchema),
 });
 export type BooksResponse = z.infer<typeof booksResponseSchema>;
+
+// Calendar — events pulled read-only from iCloud (CalDAV). Times are ISO
+// strings; all-day events carry allDay=true.
+export const calendarEventSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  start: z.string(),
+  end: z.string().nullable(),
+  allDay: z.boolean(),
+  calendar: z.string().nullable(),
+  location: z.string().nullable(),
+});
+export type CalendarEvent = z.infer<typeof calendarEventSchema>;
+
+export const calendarEventsResponseSchema = z.object({
+  events: z.array(calendarEventSchema),
+});
+export type CalendarEventsResponse = z.infer<typeof calendarEventsResponseSchema>;

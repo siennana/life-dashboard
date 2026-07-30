@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import type { ExerciseRow } from "@life/shared";
-import { getExercises } from "../api";
+import type { CalendarEvent, ExerciseRow } from "@life/shared";
+import { getCalendarEvents, getExercises } from "../api";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -41,6 +41,12 @@ function buildGrid(year: number, month: number): Cell[] {
 const chipLabel = (e: ExerciseRow) =>
   e.totalTime != null ? `${e.totalTime}min ${e.type}` : e.type;
 
+// "9:30 AM Dentist" for timed events, just the title for all-day ones.
+const eventLabel = (e: CalendarEvent) =>
+  e.allDay
+    ? e.title
+    : `${new Date(e.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${e.title}`;
+
 const selectClass =
   "rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none";
 
@@ -54,6 +60,7 @@ export function CalendarPage() {
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
 
   const exercises = useQuery({ queryKey: ["exercises"], queryFn: getExercises });
+  const calEvents = useQuery({ queryKey: ["calendar-events"], queryFn: getCalendarEvents });
 
   // Entries per calendar day, keyed YYYY-MM-DD.
   const byDay = useMemo(() => {
@@ -65,6 +72,19 @@ export function CalendarPage() {
     }
     return map;
   }, [exercises.data]);
+
+  // iCloud events per local day; the API returns them start-ordered.
+  const eventsByDay = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>();
+    for (const e of calEvents.data?.events ?? []) {
+      const d = new Date(e.start);
+      const key = dateKey(d.getFullYear(), d.getMonth(), d.getDate());
+      const list = map.get(key) ?? [];
+      list.push(e);
+      map.set(key, list);
+    }
+    return map;
+  }, [calEvents.data]);
 
   // The 42 cells chunked into 6 week rows so each row can expand/compress.
   const weeks = useMemo(() => {
@@ -191,7 +211,7 @@ export function CalendarPage() {
             return (
               <div
                 key={wi}
-                className={`group relative flex basis-0 transition-[flex-grow] duration-300 ${
+                className={`group relative flex min-h-0 basis-0 transition-[flex-grow] duration-300 ${
                   isExpanded ? "grow-[25]" : "grow"
                 }`}
               >
@@ -199,7 +219,7 @@ export function CalendarPage() {
                     The blue outline marks the selection: on the week when no
                     day is picked, else on the picked day cell below. */}
                 <div
-                  className={`flex flex-1 ${
+                  className={`flex min-w-0 flex-1 ${
                     wi < 5 ? "border-b border-zinc-800/60" : "overflow-hidden rounded-b-xl"
                   } ${
                     isExpanded && expandedDay === null
@@ -210,6 +230,7 @@ export function CalendarPage() {
                   {week.map((cell) => {
                     const key = dateKey(cell.year, cell.month, cell.day);
                     const entries = byDay.get(key) ?? [];
+                    const dayEvents = eventsByDay.get(key) ?? [];
                     const isToday = key === todayKey;
                     const isDayExpanded = isExpanded && expandedDay === key;
                     // Siblings of an expanded day squeeze to a fixed width that
@@ -254,8 +275,17 @@ export function CalendarPage() {
                         >
                           {cell.day}
                         </span>
-                        {entries.length > 0 && (
+                        {(dayEvents.length > 0 || entries.length > 0) && (
                           <div className="mt-1 space-y-1">
+                            {dayEvents.map((e) => (
+                              <div
+                                key={`cal-${e.id}`}
+                                title={e.location ?? undefined}
+                                className="truncate rounded bg-violet-500/15 px-1.5 py-0.5 text-xs text-violet-300 ring-1 ring-inset ring-violet-500/30"
+                              >
+                                {eventLabel(e)}
+                              </div>
+                            ))}
                             {entries.map((e) => (
                               <div
                                 key={e.id}

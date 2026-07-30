@@ -2,6 +2,7 @@ import type {
   BookInput,
   BookRow,
   BooksResponse,
+  CalendarEventsResponse,
   ExerciseInput,
   ExerciseRow,
   ExercisesResponse,
@@ -61,6 +62,8 @@ export async function uploadHoldings(csv: string): Promise<UploadResponse> {
 export const getExercises = () => apiFetch<ExercisesResponse>("/api/exercises");
 
 export const getBooks = () => apiFetch<BooksResponse>("/api/books");
+
+export const getCalendarEvents = () => apiFetch<CalendarEventsResponse>("/api/calendar/events");
 
 export async function addBook(input: BookInput): Promise<BookRow> {
   const res = await fetch("/api/books", {

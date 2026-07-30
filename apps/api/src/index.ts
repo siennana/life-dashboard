@@ -8,6 +8,7 @@ import { importFidelityCsv } from "./connectors/fidelity";
 import { buildPortfolio } from "./finance";
 import { createExercise, listExercises } from "./exercise";
 import { createBook, listBooks, updateBook } from "./books";
+import { syncICloud } from "./connectors/icloud";
 import { bookInputSchema, exerciseInputSchema } from "@life/shared";
 
 const app = Fastify({ logger: true });
@@ -91,6 +92,30 @@ app.get("/api/finance/portfolio", async (_req, reply) => {
   return buildPortfolio(db, config.finnhubApiKey);
 });
 
+// Calendar: events synced read-only from iCloud, ordered by start time.
+app.get("/api/calendar/events", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const rows = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.source, "calendar"), eq(events.type, "calendar-event")))
+    .orderBy(asc(events.startTs));
+  return {
+    events: rows.map((r) => {
+      const p = (r.payload ?? {}) as { allDay?: boolean; calendar?: string; location?: string };
+      return {
+        id: r.id,
+        title: r.title ?? "(untitled)",
+        start: r.startTs.toISOString(),
+        end: r.endTs?.toISOString() ?? null,
+        allDay: p.allDay ?? false,
+        calendar: p.calendar ?? null,
+        location: p.location ?? null,
+      };
+    }),
+  };
+});
+
 // Exercise: manually log a workout / list all logged workouts.
 app.post("/api/exercises", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
@@ -127,8 +152,17 @@ app.put("/api/books/:id", async (req, reply) => {
 
 app.post("/api/sync", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
-  if (!config.todoistApiToken) return { skipped: "todoist not configured" };
-  return syncTodoist(db, config.todoistApiToken);
+  const results: Record<string, unknown> = {};
+  results.todoist = config.todoistApiToken
+    ? await syncTodoist(db, config.todoistApiToken).catch((err) => ({ error: String(err) }))
+    : { skipped: "not configured" };
+  results.calendar =
+    config.icloudEmail && config.icloudAppPassword
+      ? await syncICloud(db, config.icloudEmail, config.icloudAppPassword).catch((err) => ({
+          error: String(err),
+        }))
+      : { skipped: "not configured" };
+  return results;
 });
 
 // postgres.js wraps connection failures in a `cause` chain rather than the
@@ -159,17 +193,29 @@ app.listen({ port: config.port, host: "0.0.0.0" }).catch((err) => {
   process.exit(1);
 });
 
-// Pull-based connectors: sync on boot, then every 5 minutes.
+// Pull-based connectors: sync on boot, then every 5 minutes. Each configured
+// connector runs independently — one failing must not block the others.
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 let syncing = false;
 async function runSyncs() {
   const activeDb = db;
-  if (syncing || !config.todoistApiToken || !activeDb) return;
+  if (syncing || !activeDb) return;
   syncing = true;
   try {
-    await syncTodoist(activeDb, config.todoistApiToken);
-  } catch (err) {
-    app.log.error({ err }, "todoist sync failed");
+    if (config.todoistApiToken) {
+      try {
+        await syncTodoist(activeDb, config.todoistApiToken);
+      } catch (err) {
+        app.log.error({ err }, "todoist sync failed");
+      }
+    }
+    if (config.icloudEmail && config.icloudAppPassword) {
+      try {
+        await syncICloud(activeDb, config.icloudEmail, config.icloudAppPassword);
+      } catch (err) {
+        app.log.error({ err }, "icloud calendar sync failed");
+      }
+    }
   } finally {
     syncing = false;
   }

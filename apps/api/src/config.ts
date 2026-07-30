@@ -16,6 +16,8 @@ const envSchema = z.object({
   VAULT_PATH: z.string().optional(),
   TODOIST_API_TOKEN: z.string().optional(),
   FINNHUB_API_KEY: z.string().optional(),
+  ICLOUD_EMAIL: z.string().optional(),
+  ICLOUD_APP_PASSWORD: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -42,6 +44,9 @@ const apiToken = checkToken("API_TOKEN", env.API_TOKEN);
 const todoistApiToken = checkToken("TODOIST_API_TOKEN", env.TODOIST_API_TOKEN);
 if (!env.DATABASE_URL) warnings.push("DATABASE_URL is not set");
 if (!env.FINNHUB_API_KEY) warnings.push("FINNHUB_API_KEY is not set - live prices will be unavailable");
+if (!env.ICLOUD_EMAIL || !env.ICLOUD_APP_PASSWORD) {
+  warnings.push("ICLOUD_EMAIL / ICLOUD_APP_PASSWORD not set - calendar sync disabled");
+}
 
 for (const w of warnings) console.warn(`[config] ${w}`);
 
@@ -52,5 +57,7 @@ export const config = {
   vaultPath: env.VAULT_PATH,
   todoistApiToken,
   finnhubApiKey: env.FINNHUB_API_KEY,
+  icloudEmail: env.ICLOUD_EMAIL,
+  icloudAppPassword: env.ICLOUD_APP_PASSWORD,
   warnings,
 };
