@@ -90,6 +90,7 @@ export const exerciseInputSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected date as YYYY-MM-DD"),
   description: z.string().trim().max(2000).optional(),
   totalTime: z.number().nonnegative().optional(), // minutes
+  distanceMiles: z.number().nonnegative().optional(),
   caloriesBurned: z.number().nonnegative().optional(),
 });
 export type ExerciseInput = z.infer<typeof exerciseInputSchema>;
@@ -100,6 +101,7 @@ export const exerciseRowSchema = z.object({
   date: z.string(),
   description: z.string().nullable(),
   totalTime: z.number().nullable(),
+  distanceMiles: z.number().nullable(),
   caloriesBurned: z.number().nullable(),
   createdAt: z.string(),
 });

@@ -106,3 +106,16 @@ export async function addExercise(input: ExerciseInput): Promise<ExerciseRow> {
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json() as Promise<ExerciseRow>;
 }
+
+export async function updateExercise(id: number, input: ExerciseInput): Promise<ExerciseRow> {
+  const res = await fetch(`/api/exercises/${id}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<ExerciseRow>;
+}

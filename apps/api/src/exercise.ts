@@ -10,6 +10,7 @@ type ExercisePayload = {
   exerciseType: ExerciseType;
   date: string;
   totalTime: number | null;
+  distanceMiles: number | null;
   caloriesBurned: number | null;
 };
 
@@ -21,6 +22,7 @@ function toRow(row: typeof events.$inferSelect): ExerciseRow {
     date: p.date ?? row.startTs.toISOString().slice(0, 10),
     description: row.title,
     totalTime: p.totalTime ?? null,
+    distanceMiles: p.distanceMiles ?? null,
     caloriesBurned: p.caloriesBurned ?? null,
     createdAt: row.createdAt.toISOString(),
   };
@@ -31,6 +33,7 @@ export async function createExercise(db: Db, input: ExerciseInput): Promise<Exer
     exerciseType: input.type,
     date: input.date,
     totalTime: input.totalTime ?? null,
+    distanceMiles: input.distanceMiles ?? null,
     caloriesBurned: input.caloriesBurned ?? null,
   };
   const row = (
@@ -48,6 +51,33 @@ export async function createExercise(db: Db, input: ExerciseInput): Promise<Exer
       .returning()
   )[0]!;
   return toRow(row);
+}
+
+// Full-replace edit: the form resubmits every field, so omitted optionals clear.
+// Returns null when the id isn't a manual exercise row.
+export async function updateExercise(
+  db: Db,
+  id: number,
+  input: ExerciseInput,
+): Promise<ExerciseRow | null> {
+  const payload: ExercisePayload = {
+    exerciseType: input.type,
+    date: input.date,
+    totalTime: input.totalTime ?? null,
+    distanceMiles: input.distanceMiles ?? null,
+    caloriesBurned: input.caloriesBurned ?? null,
+  };
+  const rows = await db
+    .update(events)
+    .set({
+      title: input.description ?? null,
+      startTs: new Date(`${input.date}T12:00:00Z`),
+      payload,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(events.id, id), eq(events.source, "manual"), eq(events.type, "exercise")))
+    .returning();
+  return rows[0] ? toRow(rows[0]) : null;
 }
 
 export async function listExercises(db: Db): Promise<ExerciseRow[]> {

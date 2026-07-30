@@ -6,7 +6,7 @@ import { config } from "./config";
 import { closeTodoistTask, syncTodoist } from "./connectors/todoist";
 import { importFidelityCsv } from "./connectors/fidelity";
 import { buildPortfolio } from "./finance";
-import { createExercise, listExercises } from "./exercise";
+import { createExercise, listExercises, updateExercise } from "./exercise";
 import { createBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
@@ -130,6 +130,16 @@ app.post("/api/exercises", async (req, reply) => {
 app.get("/api/exercises", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   return { exercises: await listExercises(db) };
+});
+
+app.put("/api/exercises/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid exercise id" });
+  const input = exerciseInputSchema.parse(req.body);
+  const row = await updateExercise(db, id, input);
+  if (!row) return reply.code(404).send({ error: "exercise not found" });
+  return row;
 });
 
 // Reading: manually log a book / list all logged books.
