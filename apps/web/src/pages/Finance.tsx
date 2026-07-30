@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import type { PortfolioResponse, RiskTier } from "@life/shared";
 import { getPortfolio, uploadHoldings } from "../api";
-import { gainColor, money, pct, Stat, Totals } from "../lib/finance";
+import { gainColor, money, pct, Totals } from "../lib/finance";
+import { Stat } from "../components/Stat";
 
 const qty = (n: number | null) =>
   n == null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -129,8 +130,7 @@ export function Finance() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold">Finance</h1>
-      <p className="mt-1 text-sm text-zinc-400">Portfolio performance from your Fidelity holdings.</p>
+      <h1 className="text-2xl font-semibold">Portfolio Analytics</h1>
 
       <Uploader />
 

@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getWeather } from "../api";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
+import { weatherEmoji } from "../lib/weather";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -44,6 +47,7 @@ export function CalendarPage() {
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
 
   const { byDay, eventsByDay, exercises } = useDayData();
+  const weather = useQuery({ queryKey: ["weather"], queryFn: getWeather });
 
   // The 42 cells chunked into 6 week rows so each row can expand/compress.
   const weeks = useMemo(() => {
@@ -51,6 +55,18 @@ export function CalendarPage() {
     return Array.from({ length: 6 }, (_, i) => cells.slice(i * 7, i * 7 + 7));
   }, [year, month]);
   const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+
+  // Forecast high + code by day (today-forward, ~7 days), and the grid row that
+  // contains today — weather is shown only on that current-week row.
+  const weatherByDay = useMemo(() => {
+    const map = new Map<string, { code: number; tempMax: number }>();
+    for (const d of weather.data?.daily ?? []) map.set(d.date, { code: d.code, tempMax: d.tempMax });
+    return map;
+  }, [weather.data]);
+  const currentWeekIndex = useMemo(
+    () => weeks.findIndex((week) => week.some((c) => dateKey(c.year, c.month, c.day) === todayKey)),
+    [weeks, todayKey],
+  );
 
   // A window of years around now; widens automatically if data falls outside it.
   const years = useMemo(() => {
@@ -70,9 +86,6 @@ export function CalendarPage() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold">Calendar</h1>
-      <p className="mt-1 text-sm text-zinc-400">Your logged activity, by day.</p>
-
       <div className="mt-6 flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -195,6 +208,7 @@ export function CalendarPage() {
                     // Siblings of an expanded day squeeze to a fixed width that
                     // fits just the day number (basis-9 = number + padding).
                     const isDaySqueezed = isExpanded && expandedDay !== null && !isDayExpanded;
+                    const wx = wi === currentWeekIndex ? weatherByDay.get(key) : undefined;
                     return (
                       <button
                         type="button"
@@ -221,19 +235,27 @@ export function CalendarPage() {
                             : ""
                         }`}
                       >
-                        <span
-                          className={`inline-flex shrink-0 items-center justify-center rounded-full ${
-                            isCompressed ? "h-4 w-4 text-[10px]" : "h-6 w-6 text-xs"
-                          } ${
-                            isToday
-                              ? "bg-emerald-600 font-semibold text-white"
-                              : cell.inMonth
-                                ? "text-zinc-300"
-                                : "text-zinc-600"
-                          }`}
-                        >
-                          {cell.day}
-                        </span>
+                        <div className="flex items-center justify-between gap-1">
+                          <span
+                            className={`inline-flex shrink-0 items-center justify-center rounded-full ${
+                              isCompressed ? "h-4 w-4 text-[10px]" : "h-6 w-6 text-xs"
+                            } ${
+                              isToday
+                                ? "bg-emerald-600 font-semibold text-white"
+                                : cell.inMonth
+                                  ? "text-zinc-300"
+                                  : "text-zinc-600"
+                            }`}
+                          >
+                            {cell.day}
+                          </span>
+                          {wx && !isCompressed && !isDaySqueezed && (
+                            <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-400">
+                              <span className="leading-none">{weatherEmoji(wx.code)}</span>
+                              <span className="tabular-nums">{wx.tempMax}°</span>
+                            </span>
+                          )}
+                        </div>
                         <DayChips dayEvents={dayEvents} entries={entries} />
                       </button>
                     );

@@ -32,7 +32,14 @@ export type TodoRow = {
   externalId: string;
   title: string | null;
   startTs: string;
-  payload: { status?: string; list?: string | null; notes?: string | null } | null;
+  payload: {
+    status?: string;
+    list?: string | null;
+    notes?: string | null;
+    due?: { date?: string | null } | null;
+    added_at?: string;
+    parent_id?: string | null;
+  } | null;
 };
 
 export const getTodos = () => apiFetch<{ todos: TodoRow[] }>("/api/todos");
