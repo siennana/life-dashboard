@@ -3,7 +3,9 @@
 export type NavItem = { path: string; label: string; implemented?: boolean };
 
 export const NAV_ITEMS: NavItem[] = [
+  { path: "/home", label: "Home" },
   { path: "/todos", label: "Todos", implemented: true },
+  { path: "/calendar", label: "Calendar", implemented: true },
   { path: "/finance", label: "Finance", implemented: true },
   { path: "/exercise", label: "Exercise", implemented: true },
   { path: "/career", label: "Career" },
