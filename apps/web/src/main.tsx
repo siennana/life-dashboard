@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import App from "./App";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { NAV_ITEMS } from "./nav";
+import { Exercise } from "./pages/Exercise";
 import { Finance } from "./pages/Finance";
 import { Placeholder } from "./pages/Placeholder";
 import { Todos } from "./pages/Todos";
@@ -23,6 +24,7 @@ createRoot(document.getElementById("root")!).render(
               <Route index element={<Navigate to="/todos" replace />} />
               <Route path="todos" element={<Todos />} />
               <Route path="finance" element={<Finance />} />
+              <Route path="exercise" element={<Exercise />} />
               {NAV_ITEMS.filter((item) => !item.implemented).map((item) => (
                 <Route
                   key={item.path}

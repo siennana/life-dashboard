@@ -6,6 +6,8 @@ import { config } from "./config";
 import { closeTodoistTask, syncTodoist } from "./connectors/todoist";
 import { importFidelityCsv } from "./connectors/fidelity";
 import { buildPortfolio } from "./finance";
+import { createExercise, listExercises } from "./exercise";
+import { exerciseInputSchema } from "@life/shared";
 
 const app = Fastify({ logger: true });
 
@@ -86,6 +88,18 @@ app.post("/api/finance/holdings/upload", async (req, reply) => {
 app.get("/api/finance/portfolio", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   return buildPortfolio(db, config.finnhubApiKey);
+});
+
+// Exercise: manually log a workout / list all logged workouts.
+app.post("/api/exercises", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const input = exerciseInputSchema.parse(req.body);
+  return createExercise(db, input);
+});
+
+app.get("/api/exercises", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return { exercises: await listExercises(db) };
 });
 
 app.post("/api/sync", async (_req, reply) => {

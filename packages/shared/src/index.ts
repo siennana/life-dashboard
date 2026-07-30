@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SOURCES = ["todoist", "strava", "health", "calendar", "vault", "fidelity"] as const;
+export const SOURCES = ["todoist", "strava", "health", "calendar", "vault", "fidelity", "manual"] as const;
 export const sourceSchema = z.enum(SOURCES);
 export type Source = z.infer<typeof sourceSchema>;
 
@@ -78,3 +78,34 @@ export const uploadResponseSchema = z.object({
   skipped: z.number(),
 });
 export type UploadResponse = z.infer<typeof uploadResponseSchema>;
+
+// Exercise — manually logged workouts. `type` and `date` are required; the rest
+// are optional. `date` is a plain YYYY-MM-DD (the day of the workout).
+export const EXERCISE_TYPES = ["run", "gym", "yoga", "bike", "hike", "custom"] as const;
+export const exerciseTypeSchema = z.enum(EXERCISE_TYPES);
+export type ExerciseType = z.infer<typeof exerciseTypeSchema>;
+
+export const exerciseInputSchema = z.object({
+  type: exerciseTypeSchema,
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected date as YYYY-MM-DD"),
+  description: z.string().trim().max(2000).optional(),
+  totalTime: z.number().nonnegative().optional(), // minutes
+  caloriesBurned: z.number().nonnegative().optional(),
+});
+export type ExerciseInput = z.infer<typeof exerciseInputSchema>;
+
+export const exerciseRowSchema = z.object({
+  id: z.number(),
+  type: exerciseTypeSchema,
+  date: z.string(),
+  description: z.string().nullable(),
+  totalTime: z.number().nullable(),
+  caloriesBurned: z.number().nullable(),
+  createdAt: z.string(),
+});
+export type ExerciseRow = z.infer<typeof exerciseRowSchema>;
+
+export const exercisesResponseSchema = z.object({
+  exercises: z.array(exerciseRowSchema),
+});
+export type ExercisesResponse = z.infer<typeof exercisesResponseSchema>;

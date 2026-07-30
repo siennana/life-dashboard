@@ -1,4 +1,11 @@
-import type { PortfolioResponse, StatusResponse, UploadResponse } from "@life/shared";
+import type {
+  ExerciseInput,
+  ExerciseRow,
+  ExercisesResponse,
+  PortfolioResponse,
+  StatusResponse,
+  UploadResponse,
+} from "@life/shared";
 
 async function errorMessage(res: Response): Promise<string> {
   const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -46,4 +53,19 @@ export async function uploadHoldings(csv: string): Promise<UploadResponse> {
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json() as Promise<UploadResponse>;
+}
+
+export const getExercises = () => apiFetch<ExercisesResponse>("/api/exercises");
+
+export async function addExercise(input: ExerciseInput): Promise<ExerciseRow> {
+  const res = await fetch("/api/exercises", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<ExerciseRow>;
 }
