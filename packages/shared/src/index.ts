@@ -164,3 +164,26 @@ export const calendarEventsResponseSchema = z.object({
   events: z.array(calendarEventSchema),
 });
 export type CalendarEventsResponse = z.infer<typeof calendarEventsResponseSchema>;
+
+// Weather — live read from Open-Meteo (no key). `code` is a WMO weather code;
+// the API sends an ASCII label, the web app maps the code to an emoji. Temps
+// are Fahrenheit. `configured: false` means no location is set in .env.
+export const weatherDaySchema = z.object({
+  date: z.string(), // YYYY-MM-DD
+  code: z.number(),
+  label: z.string(),
+  tempMax: z.number(),
+  tempMin: z.number(),
+  precipProbability: z.number().nullable(),
+});
+export type WeatherDay = z.infer<typeof weatherDaySchema>;
+
+export const weatherResponseSchema = z.object({
+  configured: z.boolean(),
+  location: z.string().nullable(),
+  current: z
+    .object({ temp: z.number(), code: z.number(), label: z.string() })
+    .nullable(),
+  daily: z.array(weatherDaySchema),
+});
+export type WeatherResponse = z.infer<typeof weatherResponseSchema>;

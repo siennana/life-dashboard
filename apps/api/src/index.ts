@@ -9,6 +9,7 @@ import { buildPortfolio } from "./finance";
 import { createExercise, listExercises } from "./exercise";
 import { createBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
+import { getWeather } from "./weather";
 import { bookInputSchema, exerciseInputSchema } from "@life/shared";
 
 const app = Fastify({ logger: true });
@@ -91,6 +92,9 @@ app.get("/api/finance/portfolio", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   return buildPortfolio(db, config.finnhubApiKey);
 });
+
+// Weather: live 7-day forecast from Open-Meteo for the configured location.
+app.get("/api/weather", async () => getWeather(config));
 
 // Calendar: events synced read-only from iCloud, ordered by start time.
 app.get("/api/calendar/events", async (_req, reply) => {

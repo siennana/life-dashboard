@@ -7,6 +7,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { NAV_ITEMS } from "./nav";
 import { CalendarPage } from "./pages/Calendar";
 import { Exercise } from "./pages/Exercise";
+import { Home } from "./pages/Home";
 import { Finance } from "./pages/Finance";
 import { Placeholder } from "./pages/Placeholder";
 import { Reading } from "./pages/Reading";
@@ -24,6 +25,7 @@ createRoot(document.getElementById("root")!).render(
           <Routes>
             <Route path="/" element={<App />}>
               <Route index element={<Navigate to="/todos" replace />} />
+              <Route path="home" element={<Home />} />
               <Route path="todos" element={<Todos />} />
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="finance" element={<Finance />} />

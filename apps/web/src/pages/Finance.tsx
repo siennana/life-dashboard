@@ -2,17 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import type { PortfolioResponse, RiskTier } from "@life/shared";
 import { getPortfolio, uploadHoldings } from "../api";
+import { gainColor, money, pct, Stat, Totals } from "../lib/finance";
 
-const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
-
-const money = (n: number | null) => (n == null ? "—" : usd.format(n));
 const qty = (n: number | null) =>
   n == null ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 4 });
-const pct = (n: number | null) =>
-  n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
-
-const gainColor = (n: number | null) =>
-  n == null ? "text-zinc-400" : n > 0 ? "text-emerald-400" : n < 0 ? "text-red-400" : "text-zinc-300";
 
 const TIER_LABEL: Record<RiskTier, string> = {
   low: "Low",
@@ -83,30 +76,6 @@ function RiskCard({ risk }: { risk: PortfolioResponse["risk"] }) {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className={`mt-1 text-lg font-semibold ${tone ?? "text-zinc-100"}`}>{value}</div>
-    </div>
-  );
-}
-
-function Totals({ totals }: { totals: PortfolioResponse["totals"] }) {
-  return (
-    <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <Stat label="Market value" value={money(totals.marketValue)} />
-      <Stat label="Cost basis" value={money(totals.costBasis)} />
-      <Stat
-        label="Total gain"
-        value={`${money(totals.totalGain)} (${pct(totals.totalGainPct)})`}
-        tone={gainColor(totals.totalGain)}
-      />
-      <Stat label="Today" value={money(totals.dayGain)} tone={gainColor(totals.dayGain)} />
-    </div>
-  );
-}
-
 function Uploader() {
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -134,10 +103,6 @@ function Uploader() {
       <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
         Upload Fidelity CSV
       </h2>
-      <p className="mt-2 text-sm text-zinc-400">
-        Export your positions from Fidelity and upload the CSV. We read the Symbol, Quantity, and
-        Cost Basis columns; re-uploading replaces your holdings.
-      </p>
       <div className="mt-3 flex items-center gap-3">
         <input
           ref={inputRef}

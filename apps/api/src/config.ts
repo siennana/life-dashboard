@@ -18,6 +18,9 @@ const envSchema = z.object({
   FINNHUB_API_KEY: z.string().optional(),
   ICLOUD_EMAIL: z.string().optional(),
   ICLOUD_APP_PASSWORD: z.string().optional(),
+  WEATHER_LOCATION: z.string().optional(),
+  WEATHER_LATITUDE: z.coerce.number().optional(),
+  WEATHER_LONGITUDE: z.coerce.number().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -59,5 +62,8 @@ export const config = {
   finnhubApiKey: env.FINNHUB_API_KEY,
   icloudEmail: env.ICLOUD_EMAIL,
   icloudAppPassword: env.ICLOUD_APP_PASSWORD,
+  weatherLocation: env.WEATHER_LOCATION,
+  weatherLatitude: env.WEATHER_LATITUDE,
+  weatherLongitude: env.WEATHER_LONGITUDE,
   warnings,
 };

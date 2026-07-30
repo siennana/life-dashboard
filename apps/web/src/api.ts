@@ -9,6 +9,7 @@ import type {
   PortfolioResponse,
   StatusResponse,
   UploadResponse,
+  WeatherResponse,
 } from "@life/shared";
 
 async function errorMessage(res: Response): Promise<string> {
@@ -64,6 +65,8 @@ export const getExercises = () => apiFetch<ExercisesResponse>("/api/exercises");
 export const getBooks = () => apiFetch<BooksResponse>("/api/books");
 
 export const getCalendarEvents = () => apiFetch<CalendarEventsResponse>("/api/calendar/events");
+
+export const getWeather = () => apiFetch<WeatherResponse>("/api/weather");
 
 export async function addBook(input: BookInput): Promise<BookRow> {
   const res = await fetch("/api/books", {

@@ -1,16 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import type { CalendarEvent, ExerciseRow } from "@life/shared";
-import { getCalendarEvents, getExercises } from "../api";
+import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-const dateKey = (y: number, m: number, d: number) =>
-  `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
 // One cell of the 6x7 grid; `inMonth` is false for the dimmed lead-in/lead-out
 // days of the previous/next month.
@@ -37,16 +31,6 @@ function buildGrid(year: number, month: number): Cell[] {
   return cells;
 }
 
-// "30min gym" when a duration was logged, otherwise just "gym".
-const chipLabel = (e: ExerciseRow) =>
-  e.totalTime != null ? `${e.totalTime}min ${e.type}` : e.type;
-
-// "9:30 AM Dentist" for timed events, just the title for all-day ones.
-const eventLabel = (e: CalendarEvent) =>
-  e.allDay
-    ? e.title
-    : `${new Date(e.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${e.title}`;
-
 const selectClass =
   "rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none";
 
@@ -59,32 +43,7 @@ export function CalendarPage() {
   // Within the expanded week only: a clicked day widens, its siblings squeeze.
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
 
-  const exercises = useQuery({ queryKey: ["exercises"], queryFn: getExercises });
-  const calEvents = useQuery({ queryKey: ["calendar-events"], queryFn: getCalendarEvents });
-
-  // Entries per calendar day, keyed YYYY-MM-DD.
-  const byDay = useMemo(() => {
-    const map = new Map<string, ExerciseRow[]>();
-    for (const e of exercises.data?.exercises ?? []) {
-      const list = map.get(e.date) ?? [];
-      list.push(e);
-      map.set(e.date, list);
-    }
-    return map;
-  }, [exercises.data]);
-
-  // iCloud events per local day; the API returns them start-ordered.
-  const eventsByDay = useMemo(() => {
-    const map = new Map<string, CalendarEvent[]>();
-    for (const e of calEvents.data?.events ?? []) {
-      const d = new Date(e.start);
-      const key = dateKey(d.getFullYear(), d.getMonth(), d.getDate());
-      const list = map.get(key) ?? [];
-      list.push(e);
-      map.set(key, list);
-    }
-    return map;
-  }, [calEvents.data]);
+  const { byDay, eventsByDay, exercises } = useDayData();
 
   // The 42 cells chunked into 6 week rows so each row can expand/compress.
   const weeks = useMemo(() => {
@@ -275,28 +234,7 @@ export function CalendarPage() {
                         >
                           {cell.day}
                         </span>
-                        {(dayEvents.length > 0 || entries.length > 0) && (
-                          <div className="mt-1 space-y-1">
-                            {dayEvents.map((e) => (
-                              <div
-                                key={`cal-${e.id}`}
-                                title={e.location ?? undefined}
-                                className="truncate rounded bg-violet-500/15 px-1.5 py-0.5 text-xs text-violet-300 ring-1 ring-inset ring-violet-500/30"
-                              >
-                                {eventLabel(e)}
-                              </div>
-                            ))}
-                            {entries.map((e) => (
-                              <div
-                                key={e.id}
-                                title={e.description ?? undefined}
-                                className="truncate rounded bg-blue-500/15 px-1.5 py-0.5 text-xs text-blue-300 ring-1 ring-inset ring-blue-500/30"
-                              >
-                                {chipLabel(e)}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <DayChips dayEvents={dayEvents} entries={entries} />
                       </button>
                     );
                   })}
