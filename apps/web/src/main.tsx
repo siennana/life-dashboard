@@ -9,6 +9,7 @@ import { CalendarPage } from "./pages/Calendar";
 import { Exercise } from "./pages/Exercise";
 import { Finance } from "./pages/Finance";
 import { Placeholder } from "./pages/Placeholder";
+import { Reading } from "./pages/Reading";
 import { Todos } from "./pages/Todos";
 import "./index.css";
 
@@ -27,6 +28,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="finance" element={<Finance />} />
               <Route path="exercise" element={<Exercise />} />
+              <Route path="reading" element={<Reading />} />
               {NAV_ITEMS.filter((item) => !item.implemented).map((item) => (
                 <Route
                   key={item.path}

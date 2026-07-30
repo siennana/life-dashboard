@@ -109,3 +109,40 @@ export const exercisesResponseSchema = z.object({
   exercises: z.array(exerciseRowSchema),
 });
 export type ExercisesResponse = z.infer<typeof exercisesResponseSchema>;
+
+// Reading — manually logged books. `title` and `status` are required; rating
+// is out of 5 in half-star steps; dates are plain YYYY-MM-DD.
+export const BOOK_STATUSES = ["reading", "complete", "queued", "abandoned"] as const;
+export const bookStatusSchema = z.enum(BOOK_STATUSES);
+export type BookStatus = z.infer<typeof bookStatusSchema>;
+
+const dayString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected date as YYYY-MM-DD");
+
+export const bookInputSchema = z.object({
+  title: z.string().trim().min(1).max(500),
+  status: bookStatusSchema,
+  author: z.string().trim().max(300).optional(),
+  rating: z.number().min(0.5).max(5).multipleOf(0.5).optional(),
+  log: z.string().trim().max(20000).optional(),
+  dateStarted: dayString.optional(),
+  dateCompleted: dayString.optional(),
+});
+export type BookInput = z.infer<typeof bookInputSchema>;
+
+export const bookRowSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  author: z.string().nullable(),
+  rating: z.number().nullable(),
+  log: z.string().nullable(),
+  dateStarted: z.string().nullable(),
+  dateCompleted: z.string().nullable(),
+  status: bookStatusSchema,
+  createdAt: z.string(),
+});
+export type BookRow = z.infer<typeof bookRowSchema>;
+
+export const booksResponseSchema = z.object({
+  books: z.array(bookRowSchema),
+});
+export type BooksResponse = z.infer<typeof booksResponseSchema>;

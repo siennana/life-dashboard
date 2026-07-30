@@ -8,6 +8,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: "/calendar", label: "Calendar", implemented: true },
   { path: "/finance", label: "Finance", implemented: true },
   { path: "/exercise", label: "Exercise", implemented: true },
+  { path: "/reading", label: "Reading", implemented: true },
   { path: "/career", label: "Career" },
   { path: "/wedding", label: "Wedding" },
 ];

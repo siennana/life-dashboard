@@ -1,4 +1,7 @@
 import type {
+  BookInput,
+  BookRow,
+  BooksResponse,
   ExerciseInput,
   ExerciseRow,
   ExercisesResponse,
@@ -56,6 +59,34 @@ export async function uploadHoldings(csv: string): Promise<UploadResponse> {
 }
 
 export const getExercises = () => apiFetch<ExercisesResponse>("/api/exercises");
+
+export const getBooks = () => apiFetch<BooksResponse>("/api/books");
+
+export async function addBook(input: BookInput): Promise<BookRow> {
+  const res = await fetch("/api/books", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<BookRow>;
+}
+
+export async function updateBook(id: number, input: BookInput): Promise<BookRow> {
+  const res = await fetch(`/api/books/${id}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<BookRow>;
+}
 
 export async function addExercise(input: ExerciseInput): Promise<ExerciseRow> {
   const res = await fetch("/api/exercises", {

@@ -20,7 +20,7 @@ const prettyDate = (d: string) =>
 const fieldClass =
   "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none";
 
-function LogForm() {
+function LogForm({ onDone }: { onDone: () => void }) {
   const queryClient = useQueryClient();
   const [type, setType] = useState<ExerciseType>("run");
   const [date, setDate] = useState(today());
@@ -35,6 +35,7 @@ function LogForm() {
       setDescription("");
       setTotalTime("");
       setCalories("");
+      onDone();
     },
   });
 
@@ -82,7 +83,7 @@ function LogForm() {
           />
         </label>
         <label className="block sm:col-span-2">
-          <span className="text-xs text-zinc-500">Description</span>
+          <span className="text-xs text-zinc-500">Log</span>
           <input
             type="text"
             value={description}
@@ -124,6 +125,13 @@ function LogForm() {
         >
           {add.isPending ? "Saving…" : "Add entry"}
         </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+        >
+          Cancel
+        </button>
         {add.isError && <span className="text-sm text-red-400">{(add.error as Error).message}</span>}
       </div>
     </form>
@@ -133,13 +141,24 @@ function LogForm() {
 export function Exercise() {
   const exercises = useQuery({ queryKey: ["exercises"], queryFn: getExercises });
   const rows = exercises.data?.exercises ?? [];
+  const [formOpen, setFormOpen] = useState(false);
 
   return (
     <>
       <h1 className="text-2xl font-semibold">Exercise</h1>
       <p className="mt-1 text-sm text-zinc-400">Log your workouts and review your history.</p>
 
-      <LogForm />
+      {formOpen ? (
+        <LogForm onDone={() => setFormOpen(false)} />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setFormOpen(true)}
+          className="mt-6 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+        >
+          + Add Entry
+        </button>
+      )}
 
       <section className="mt-6">
         {exercises.isPending && <p className="text-zinc-400">Loading…</p>}
@@ -157,10 +176,9 @@ export function Exercise() {
                 <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
                   <th className="px-4 py-3 font-medium">Date</th>
                   <th className="px-4 py-3 font-medium">Type</th>
-                  <th className="px-4 py-3 font-medium">Description</th>
+                  <th className="px-4 py-3 font-medium">Log</th>
                   <th className="px-4 py-3 text-right font-medium">Time</th>
                   <th className="px-4 py-3 text-right font-medium">Calories</th>
-                  <th className="px-4 py-3 text-right font-medium">Logged</th>
                 </tr>
               </thead>
               <tbody>
@@ -178,9 +196,6 @@ export function Exercise() {
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
                       {r.caloriesBurned == null ? "—" : `${r.caloriesBurned} cal`}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-zinc-500">
-                      {new Date(r.createdAt).toLocaleString()}
                     </td>
                   </tr>
                 ))}

@@ -7,7 +7,8 @@ import { closeTodoistTask, syncTodoist } from "./connectors/todoist";
 import { importFidelityCsv } from "./connectors/fidelity";
 import { buildPortfolio } from "./finance";
 import { createExercise, listExercises } from "./exercise";
-import { exerciseInputSchema } from "@life/shared";
+import { createBook, listBooks, updateBook } from "./books";
+import { bookInputSchema, exerciseInputSchema } from "@life/shared";
 
 const app = Fastify({ logger: true });
 
@@ -100,6 +101,28 @@ app.post("/api/exercises", async (req, reply) => {
 app.get("/api/exercises", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   return { exercises: await listExercises(db) };
+});
+
+// Reading: manually log a book / list all logged books.
+app.post("/api/books", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const input = bookInputSchema.parse(req.body);
+  return createBook(db, input);
+});
+
+app.get("/api/books", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return { books: await listBooks(db) };
+});
+
+app.put("/api/books/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid book id" });
+  const input = bookInputSchema.parse(req.body);
+  const row = await updateBook(db, id, input);
+  if (!row) return reply.code(404).send({ error: "book not found" });
+  return row;
 });
 
 app.post("/api/sync", async (_req, reply) => {

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { events, type Db } from "@life/db";
 import type { ExerciseInput, ExerciseRow, ExerciseType } from "@life/shared";
 
@@ -54,7 +54,9 @@ export async function listExercises(db: Db): Promise<ExerciseRow[]> {
   const rows = await db
     .select()
     .from(events)
-    .where(and(eq(events.source, "manual"), eq(events.type, "exercise")))
-    .orderBy(desc(events.startTs), desc(events.createdAt));
-  return rows.map(toRow);
+    .where(and(eq(events.source, "manual"), eq(events.type, "exercise")));
+  // Workout date descending (most recent first); same-day ties newest-logged first.
+  return rows
+    .map(toRow)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
 }
