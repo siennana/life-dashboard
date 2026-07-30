@@ -14,9 +14,15 @@ export const gainColor = (n: number | null) =>
 // Market value / cost basis / total gain / today's gain — the four portfolio
 // totals. This is the entire Home finance widget body, and the header of the
 // full Finance page.
-export function Totals({ totals }: { totals: PortfolioResponse["totals"] }) {
+export function Totals({
+  totals,
+  gridClassName = "grid-cols-2 sm:grid-cols-4",
+}: {
+  totals: PortfolioResponse["totals"];
+  gridClassName?: string;
+}) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className={`grid gap-3 ${gridClassName}`}>
       <Stat label="Market value" value={money(totals.marketValue)} />
       <Stat label="Cost basis" value={money(totals.costBasis)} />
       <Stat

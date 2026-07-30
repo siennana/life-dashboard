@@ -23,7 +23,7 @@ export function WeatherWidget() {
   const weather = useQuery({ queryKey: ["weather"], queryFn: getWeather });
 
   return (
-    <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+    <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Weather</h2>
         {weather.data?.location && (

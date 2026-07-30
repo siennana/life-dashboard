@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   EXERCISE_TYPES,
   type ExerciseInput,
@@ -8,6 +8,8 @@ import {
 } from "@life/shared";
 import { addExercise, getExercises, updateExercise } from "../api";
 import { Stat } from "../components/Stat";
+import { SlideDown } from "../components/SlideDown";
+import { useInlineEdit } from "../lib/useInlineEdit";
 
 // Local calendar date as YYYY-MM-DD (so "today" matches the user's clock, not UTC).
 function today(): string {
@@ -26,7 +28,15 @@ const prettyDate = (d: string) =>
 const fieldClass =
   "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none";
 
-function LogForm({ editing, onDone }: { editing: ExerciseRow | null; onDone: () => void }) {
+function LogForm({
+  editing,
+  onDone,
+  inline = false,
+}: {
+  editing: ExerciseRow | null;
+  onDone: () => void;
+  inline?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [type, setType] = useState<ExerciseType>("run");
   const [date, setDate] = useState(today());
@@ -81,7 +91,7 @@ function LogForm({ editing, onDone }: { editing: ExerciseRow | null; onDone: () 
   return (
     <form
       onSubmit={onSubmit}
-      className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5"
+      className={`rounded-xl border border-zinc-800 p-5 ${inline ? "bg-zinc-950/60" : "mt-6 bg-zinc-900"}`}
     >
       <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
         {editing ? "Edit workout" : "Log a workout"}
@@ -249,20 +259,14 @@ export function Exercise() {
   const exercises = useQuery({ queryKey: ["exercises"], queryFn: getExercises });
   const rows = exercises.data?.exercises ?? [];
   const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<ExerciseRow | null>(null);
+  const { editing, closing, open: openEdit, close: closeEdit } = useInlineEdit<ExerciseRow>();
 
   return (
     <>
       <ExerciseStats rows={rows} />
 
-      {formOpen || editing ? (
-        <LogForm
-          editing={editing}
-          onDone={() => {
-            setEditing(null);
-            setFormOpen(false);
-          }}
-        />
+      {formOpen ? (
+        <LogForm editing={null} onDone={() => setFormOpen(false)} />
       ) : (
         <button
           type="button"
@@ -297,35 +301,57 @@ export function Exercise() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-zinc-800/50 last:border-0">
-                    <td className="whitespace-nowrap px-4 py-3 text-zinc-300">{prettyDate(r.date)}</td>
-                    <td className="px-4 py-3">
-                      <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs capitalize text-zinc-200">
-                        {r.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-zinc-300">{r.description ?? "—"}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
-                      {r.totalTime == null ? "—" : `${r.totalTime} min`}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
-                      {r.distanceMiles == null ? "—" : `${r.distanceMiles} mi`}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
-                      {r.caloriesBurned == null ? "—" : `${r.caloriesBurned} cal`}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => setEditing(r)}
-                        className="text-xs text-zinc-500 hover:text-zinc-200"
+                {rows.map((r) => {
+                  const isEditing = editing?.id === r.id;
+                  return (
+                    <Fragment key={r.id}>
+                      <tr
+                        className={`border-b border-zinc-800/50 last:border-0 ${
+                          isEditing ? "bg-zinc-800/40" : ""
+                        }`}
                       >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                        <td className="whitespace-nowrap px-4 py-3 text-zinc-300">
+                          {prettyDate(r.date)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs capitalize text-zinc-200">
+                            {r.type}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-zinc-300">{r.description ?? "—"}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
+                          {r.totalTime == null ? "—" : `${r.totalTime} min`}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
+                          {r.distanceMiles == null ? "—" : `${r.distanceMiles} mi`}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
+                          {r.caloriesBurned == null ? "—" : `${r.caloriesBurned} cal`}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => (isEditing ? closeEdit() : openEdit(r))}
+                            className="text-xs text-zinc-500 hover:text-zinc-200"
+                          >
+                            {isEditing ? "Close" : "Edit"}
+                          </button>
+                        </td>
+                      </tr>
+                      {isEditing && (
+                        <tr className="bg-zinc-800/40">
+                          <td colSpan={7} className="p-0">
+                            <SlideDown open={!closing}>
+                              <div className="px-3 pb-3">
+                                <LogForm inline editing={r} onDone={closeEdit} />
+                              </div>
+                            </SlideDown>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

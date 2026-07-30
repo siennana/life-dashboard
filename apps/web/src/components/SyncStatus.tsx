@@ -7,7 +7,7 @@ export function SyncStatus() {
   const status = useQuery({ queryKey: ["status"], queryFn: getStatus });
 
   return (
-    <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+    <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
       <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Sync status</h2>
       {status.isPending && <p className="mt-3 text-zinc-400">Connecting…</p>}
       {status.isError && (

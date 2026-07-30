@@ -1,39 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { closeTodo, getTodos, type TodoRow } from "../api";
-
-// Local calendar date as YYYY-MM-DD.
-function localToday(): string {
-  const d = new Date();
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-}
-
-const dueOf = (t: TodoRow) => t.payload?.due?.date?.slice(0, 10) ?? null;
-const addedOf = (t: TodoRow) => t.payload?.added_at ?? t.startTs;
-
-// Dated todos first (earliest due first); undated ones sink to the bottom,
-// ordered among themselves by date added.
-function compareTodos(a: TodoRow, b: TodoRow): number {
-  const da = dueOf(a);
-  const db = dueOf(b);
-  if (da && db) return da.localeCompare(db);
-  if (da) return -1;
-  if (db) return 1;
-  return addedOf(a).localeCompare(addedOf(b));
-}
-
-// Due date on the right: red if overdue, green if today, grey otherwise.
-function DueDate({ todo }: { todo: TodoRow }) {
-  const due = dueOf(todo);
-  if (!due) return null;
-  const today = localToday();
-  const color = due < today ? "text-red-400" : due === today ? "text-emerald-400" : "text-zinc-500";
-  const label = new Date(`${due}T12:00:00`).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-  return <span className={`shrink-0 text-xs ${color}`}>{label}</span>;
-}
+import { compareTodos, CompleteButton, DueDate } from "../lib/todos";
 
 // One todo's row content (complete circle + title + due), shared by parent rows
 // and subtask rows.
@@ -48,12 +16,10 @@ function TodoLeaf({
 }) {
   return (
     <>
-      <button
-        type="button"
-        aria-label={`Complete ${todo.title}`}
+      <CompleteButton
+        title={todo.title}
+        onComplete={() => onComplete(todo.externalId)}
         disabled={disabled}
-        onClick={() => onComplete(todo.externalId)}
-        className="h-4 w-4 shrink-0 rounded-full border border-zinc-600 hover:border-emerald-400 hover:bg-emerald-400/20 disabled:opacity-50"
       />
       <span className="flex-1">{todo.title}</span>
       <DueDate todo={todo} />

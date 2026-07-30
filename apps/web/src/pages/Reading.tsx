@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { BOOK_STATUSES, type BookInput, type BookRow, type BookStatus } from "@life/shared";
 import { addBook, getBooks, updateBook } from "../api";
+import { SlideDown } from "../components/SlideDown";
+import { useInlineEdit } from "../lib/useInlineEdit";
 
 // 0.5 .. 5 in half-star steps for the rating dropdown.
 const RATINGS = Array.from({ length: 10 }, (_, i) => (i + 1) / 2);
@@ -46,7 +48,15 @@ const prettyDate = (d: string | null) =>
 const fieldClass =
   "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none";
 
-function LogForm({ editing, onDone }: { editing: BookRow | null; onDone: () => void }) {
+function LogForm({
+  editing,
+  onDone,
+  inline = false,
+}: {
+  editing: BookRow | null;
+  onDone: () => void;
+  inline?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
@@ -103,7 +113,10 @@ function LogForm({ editing, onDone }: { editing: BookRow | null; onDone: () => v
   }
 
   return (
-    <form onSubmit={onSubmit} className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+    <form
+      onSubmit={onSubmit}
+      className={`rounded-xl border border-zinc-800 p-5 ${inline ? "bg-zinc-950/60" : "mt-6 bg-zinc-900"}`}
+    >
       <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
         {editing ? `Editing: ${editing.title}` : "Log a book"}
       </h2>
@@ -215,19 +228,13 @@ function LogForm({ editing, onDone }: { editing: BookRow | null; onDone: () => v
 export function Reading() {
   const books = useQuery({ queryKey: ["books"], queryFn: getBooks });
   const rows = books.data?.books ?? [];
-  const [editing, setEditing] = useState<BookRow | null>(null);
+  const { editing, closing, open: openEdit, close: closeEdit } = useInlineEdit<BookRow>();
   const [formOpen, setFormOpen] = useState(false);
 
   return (
     <>
-      {formOpen || editing ? (
-        <LogForm
-          editing={editing}
-          onDone={() => {
-            setEditing(null);
-            setFormOpen(false);
-          }}
-        />
+      {formOpen ? (
+        <LogForm editing={null} onDone={() => setFormOpen(false)} />
       ) : (
         <button
           type="button"
@@ -262,40 +269,60 @@ export function Reading() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((b) => (
-                  <tr key={b.id} className="border-b border-zinc-800/50 last:border-0 align-top">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-zinc-100">{b.title}</div>
-                      {b.author && <div className="text-xs text-zinc-500">{b.author}</div>}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3">
-                      <StatusBadge status={b.status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <Stars rating={b.rating} />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-zinc-300">
-                      {prettyDate(b.dateStarted)}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-zinc-300">
-                      {prettyDate(b.dateCompleted)}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-400">
-                      <div className="max-w-[16rem] truncate" title={b.log ?? undefined}>
-                        {b.log ?? "—"}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => setEditing(b)}
-                        className="text-xs text-zinc-500 hover:text-zinc-200"
+                {rows.map((b) => {
+                  const isEditing = editing?.id === b.id;
+                  return (
+                    <Fragment key={b.id}>
+                      <tr
+                        className={`border-b border-zinc-800/50 last:border-0 align-top ${
+                          isEditing ? "bg-zinc-800/40" : ""
+                        }`}
                       >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-zinc-100">{b.title}</div>
+                          {b.author && <div className="text-xs text-zinc-500">{b.author}</div>}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <StatusBadge status={b.status} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <Stars rating={b.rating} />
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-zinc-300">
+                          {prettyDate(b.dateStarted)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-zinc-300">
+                          {prettyDate(b.dateCompleted)}
+                        </td>
+                        <td className="px-4 py-3 text-zinc-400">
+                          <div className="max-w-[16rem] truncate" title={b.log ?? undefined}>
+                            {b.log ?? "—"}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => (isEditing ? closeEdit() : openEdit(b))}
+                            className="text-xs text-zinc-500 hover:text-zinc-200"
+                          >
+                            {isEditing ? "Close" : "Edit"}
+                          </button>
+                        </td>
+                      </tr>
+                      {isEditing && (
+                        <tr className="bg-zinc-800/40">
+                          <td colSpan={7} className="p-0">
+                            <SlideDown open={!closing}>
+                              <div className="px-3 pb-3">
+                                <LogForm inline editing={b} onDone={closeEdit} />
+                              </div>
+                            </SlideDown>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
