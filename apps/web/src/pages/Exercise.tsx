@@ -91,7 +91,7 @@ function LogForm({
   return (
     <form
       onSubmit={onSubmit}
-      className={`rounded-xl border border-zinc-800 p-5 ${inline ? "bg-zinc-950/60" : "mt-6 bg-zinc-900"}`}
+      className={`rounded-xl border border-zinc-800 p-5 ${inline ? "bg-zinc-950/60" : "mt-3 bg-zinc-900"}`}
     >
       <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
         {editing ? "Edit workout" : "Log a workout"}
@@ -271,13 +271,13 @@ export function Exercise() {
         <button
           type="button"
           onClick={() => setFormOpen(true)}
-          className="mt-6 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+          className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
         >
           + Add Entry
         </button>
       )}
 
-      <section className="mt-6">
+      <section className="mt-3">
         {exercises.isPending && <p className="text-zinc-400">Loading…</p>}
         {exercises.isError && (
           <p className="text-red-400">Couldn't load exercises — {(exercises.error as Error).message}</p>

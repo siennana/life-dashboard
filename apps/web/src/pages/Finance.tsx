@@ -36,7 +36,7 @@ function RiskBadge({ tier, beta }: { tier: RiskTier; beta: number | null }) {
 
 function RiskCard({ risk }: { risk: PortfolioResponse["risk"] }) {
   return (
-    <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+    <section className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Portfolio risk</h2>
         <RiskBadge tier={risk.rating} beta={risk.portfolioBeta} />
@@ -100,7 +100,7 @@ function Uploader() {
   }
 
   return (
-    <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+    <section className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
       <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
         Upload Fidelity CSV
       </h2>
@@ -135,13 +135,13 @@ export function Finance() {
       <Uploader />
 
       {portfolio.data && !portfolio.data.quotesConfigured && positions.length > 0 && (
-        <p className="mt-6 rounded-lg border border-amber-900/50 bg-amber-950/30 p-3 text-sm text-amber-300">
+        <p className="mt-3 rounded-lg border border-amber-900/50 bg-amber-950/30 p-3 text-sm text-amber-300">
           Live prices are off — set <code>FINNHUB_API_KEY</code> in <code>.env</code> to see current
           value and today's change.
         </p>
       )}
 
-      <section className="mt-6">
+      <section className="mt-3">
         {portfolio.isPending && <p className="text-zinc-400">Loading…</p>}
         {portfolio.isError && (
           <p className="text-red-400">

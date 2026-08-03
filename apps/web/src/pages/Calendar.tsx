@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { getWeather } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getWeather, markPeriod } from "../api";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
 import { weatherEmoji } from "../lib/weather";
+import { usePeriodDays } from "../lib/period";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -48,6 +49,36 @@ export function CalendarPage() {
 
   const { byDay, eventsByDay, exercises } = useDayData();
   const weather = useQuery({ queryKey: ["weather"], queryFn: getWeather });
+  const { periodDays } = usePeriodDays();
+
+  // Right-click context menu for marking a day as a period start/end.
+  const [menu, setMenu] = useState<{ x: number; y: number; date: string } | null>(null);
+  const queryClient = useQueryClient();
+  const mark = useMutation({
+    mutationFn: markPeriod,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["periods"] });
+      setMenu(null);
+    },
+  });
+
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menu]);
+
+  function openContextMenu(e: React.MouseEvent, date: string) {
+    e.preventDefault();
+    const width = 190;
+    const height = 90;
+    setMenu({
+      x: Math.min(e.clientX, window.innerWidth - width - 8),
+      y: Math.min(e.clientY, window.innerHeight - height - 8),
+      date,
+    });
+  }
 
   // The 42 cells chunked into 6 week rows so each row can expand/compress.
   const weeks = useMemo(() => {
@@ -209,6 +240,7 @@ export function CalendarPage() {
                     // fits just the day number (basis-9 = number + padding).
                     const isDaySqueezed = isExpanded && expandedDay !== null && !isDayExpanded;
                     const wx = wi === currentWeekIndex ? weatherByDay.get(key) : undefined;
+                    const isPeriod = periodDays.has(key);
                     return (
                       <button
                         type="button"
@@ -224,6 +256,7 @@ export function CalendarPage() {
                             setExpandedDay(key);
                           }
                         }}
+                        onContextMenu={(e) => openContextMenu(e, key)}
                         aria-label={key}
                         className={`flex flex-col overflow-hidden border-r border-zinc-800/60 text-left transition-[flex-grow,flex-basis] duration-300 last:border-r-0 hover:bg-zinc-800/40 ${
                           isDaySqueezed ? "grow-0 basis-9" : "grow basis-0"
@@ -240,11 +273,15 @@ export function CalendarPage() {
                             className={`inline-flex shrink-0 items-center justify-center rounded-full ${
                               isCompressed ? "h-4 w-4 text-[10px]" : "h-6 w-6 text-xs"
                             } ${
-                              isToday
-                                ? "bg-emerald-600 font-semibold text-white"
-                                : cell.inMonth
-                                  ? "text-zinc-300"
-                                  : "text-zinc-600"
+                              isPeriod && isToday
+                                ? "bg-red-600 font-semibold text-white ring-2 ring-emerald-400"
+                                : isPeriod
+                                  ? "bg-red-600 font-semibold text-white"
+                                  : isToday
+                                    ? "bg-emerald-600 font-semibold text-white"
+                                    : cell.inMonth
+                                      ? "text-zinc-300"
+                                      : "text-zinc-600"
                             }`}
                           >
                             {cell.day}
@@ -293,6 +330,41 @@ export function CalendarPage() {
           </div>
         </div>
       </div>
+
+      {menu && (
+        <>
+          {/* Click-away / right-click-away overlay to dismiss the menu. */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div
+            className="fixed z-50 w-48 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-800 py-1 text-sm shadow-xl"
+            style={{ top: menu.y, left: menu.x }}
+          >
+            <button
+              type="button"
+              disabled={mark.isPending}
+              onClick={() => mark.mutate({ date: menu.date, kind: "start" })}
+              className="block w-full px-3 py-1.5 text-left text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+            >
+              Mark period start
+            </button>
+            <button
+              type="button"
+              disabled={mark.isPending}
+              onClick={() => mark.mutate({ date: menu.date, kind: "end" })}
+              className="block w-full px-3 py-1.5 text-left text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+            >
+              Mark period end
+            </button>
+          </div>
+        </>
+      )}
     </>
   );
 }

@@ -27,6 +27,89 @@ function TodoLeaf({
   );
 }
 
+// A flat list of todos as a one-level tree: roots + their subtasks (matched by
+// parent_id). A child whose parent isn't in the same set is treated as a root.
+function buildTree(rows: TodoRow[]): { roots: TodoRow[]; childrenOf: Map<string, TodoRow[]> } {
+  const ids = new Set(rows.map((t) => t.externalId));
+  const childrenOf = new Map<string, TodoRow[]>();
+  const roots: TodoRow[] = [];
+  for (const t of rows) {
+    const parent = t.payload?.parent_id ?? null;
+    if (parent && ids.has(parent)) {
+      const arr = childrenOf.get(parent) ?? [];
+      arr.push(t);
+      childrenOf.set(parent, arr);
+    } else {
+      roots.push(t);
+    }
+  }
+  roots.sort(compareTodos);
+  for (const arr of childrenOf.values()) arr.sort(compareTodos);
+  return { roots, childrenOf };
+}
+
+// One Todoist list's panel: title + its todo tree. Shared by every list section.
+function TodoSection({
+  title,
+  roots,
+  childrenOf,
+  collapsed,
+  onToggle,
+  onComplete,
+  disabled,
+  className,
+}: {
+  title: string;
+  roots: TodoRow[];
+  childrenOf: Map<string, TodoRow[]>;
+  collapsed: Set<string>;
+  onToggle: (id: string) => void;
+  onComplete: (externalId: string) => void;
+  disabled: boolean;
+  className?: string;
+}) {
+  return (
+    <section className={`rounded-xl border border-zinc-800 bg-zinc-900 p-5 ${className ?? ""}`}>
+      <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">{title}</h2>
+      <ul className="mt-3 space-y-2">
+        {roots.map((t) => {
+          const kids = childrenOf.get(t.externalId) ?? [];
+          const open = kids.length > 0 && !collapsed.has(t.externalId);
+          return (
+            <li key={t.externalId}>
+              <div className="flex items-center gap-3 text-sm">
+                {kids.length > 0 ? (
+                  <button
+                    type="button"
+                    aria-label={open ? "Collapse subtasks" : "Expand subtasks"}
+                    aria-expanded={open}
+                    onClick={() => onToggle(t.externalId)}
+                    className="w-4 shrink-0 text-xs text-zinc-500 hover:text-zinc-200"
+                  >
+                    {open ? "▾" : "▸"}
+                  </button>
+                ) : (
+                  <span className="w-4 shrink-0" />
+                )}
+                <TodoLeaf todo={t} onComplete={onComplete} disabled={disabled} />
+              </div>
+              {open && (
+                <ul className="ml-8 mt-2 space-y-2 border-l border-zinc-800 pl-3">
+                  {kids.map((c) => (
+                    <li key={c.externalId} className="flex items-center gap-3 text-sm">
+                      <TodoLeaf todo={c} onComplete={onComplete} disabled={disabled} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export function Todos() {
   const queryClient = useQueryClient();
   const todos = useQuery({ queryKey: ["todos"], queryFn: getTodos });
@@ -36,29 +119,21 @@ export function Todos() {
   });
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
-  // Inbox todos as a one-level tree: roots + their subtasks (matched by
-  // parent_id). A child whose parent isn't in the set is treated as a root.
-  const { roots, childrenOf } = useMemo(() => {
-    const inbox =
-      todos.data?.todos.filter(
-        (t) => t.payload?.status !== "completed" && t.payload?.list === "Inbox",
-      ) ?? [];
-    const ids = new Set(inbox.map((t) => t.externalId));
-    const childrenOf = new Map<string, TodoRow[]>();
-    const roots: TodoRow[] = [];
-    for (const t of inbox) {
-      const parent = t.payload?.parent_id ?? null;
-      if (parent && ids.has(parent)) {
-        const arr = childrenOf.get(parent) ?? [];
-        arr.push(t);
-        childrenOf.set(parent, arr);
-      } else {
-        roots.push(t);
-      }
+  // Open todos grouped by their Todoist list, each built into its own tree.
+  // Inbox leads; every other list follows alphabetically.
+  const listSections = useMemo(() => {
+    const open = todos.data?.todos.filter((t) => t.payload?.status !== "completed") ?? [];
+    const byList = new Map<string, TodoRow[]>();
+    for (const t of open) {
+      const list = t.payload?.list ?? "Other";
+      const arr = byList.get(list) ?? [];
+      arr.push(t);
+      byList.set(list, arr);
     }
-    roots.sort(compareTodos);
-    for (const arr of childrenOf.values()) arr.sort(compareTodos);
-    return { roots, childrenOf };
+    const names = [...byList.keys()].sort((a, b) =>
+      a === "Inbox" ? -1 : b === "Inbox" ? 1 : a.localeCompare(b),
+    );
+    return names.map((name) => ({ name, ...buildTree(byList.get(name)!) }));
   }, [todos.data]);
 
   function toggle(id: string) {
@@ -80,61 +155,29 @@ export function Todos() {
         })}
       </p>
 
-      <section className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Inbox</h2>
-        {todos.isPending && <p className="mt-3 text-zinc-400">Loading…</p>}
-        {todos.isError && (
-          <p className="mt-3 text-red-400">
-            Couldn't load todos — {(todos.error as Error).message}
-          </p>
-        )}
-        {todos.isSuccess && roots.length === 0 && (
-          <p className="mt-3 text-zinc-400">
-            All clear — add todos in Todoist and they'll appear within 5 minutes.
-          </p>
-        )}
-        {roots.length > 0 && (
-          <ul className="mt-3 space-y-2">
-            {roots.map((t) => {
-              const kids = childrenOf.get(t.externalId) ?? [];
-              const open = kids.length > 0 && !collapsed.has(t.externalId);
-              return (
-                <li key={t.externalId}>
-                  <div className="flex items-center gap-3 text-sm">
-                    {kids.length > 0 ? (
-                      <button
-                        type="button"
-                        aria-label={open ? "Collapse subtasks" : "Expand subtasks"}
-                        aria-expanded={open}
-                        onClick={() => toggle(t.externalId)}
-                        className="w-4 shrink-0 text-xs text-zinc-500 hover:text-zinc-200"
-                      >
-                        {open ? "▾" : "▸"}
-                      </button>
-                    ) : (
-                      <span className="w-4 shrink-0" />
-                    )}
-                    <TodoLeaf todo={t} onComplete={complete.mutate} disabled={complete.isPending} />
-                  </div>
-                  {open && (
-                    <ul className="ml-8 mt-2 space-y-2 border-l border-zinc-800 pl-3">
-                      {kids.map((c) => (
-                        <li key={c.externalId} className="flex items-center gap-3 text-sm">
-                          <TodoLeaf
-                            todo={c}
-                            onComplete={complete.mutate}
-                            disabled={complete.isPending}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+      {todos.isPending && <p className="mt-3 text-zinc-400">Loading…</p>}
+      {todos.isError && (
+        <p className="mt-3 text-red-400">Couldn't load todos — {(todos.error as Error).message}</p>
+      )}
+      {todos.isSuccess && listSections.length === 0 && (
+        <p className="mt-3 text-zinc-400">
+          All clear — add todos in Todoist and they'll appear within 5 minutes.
+        </p>
+      )}
+
+      {listSections.map((section) => (
+        <TodoSection
+          key={section.name}
+          className="mt-3"
+          title={section.name}
+          roots={section.roots}
+          childrenOf={section.childrenOf}
+          collapsed={collapsed}
+          onToggle={toggle}
+          onComplete={complete.mutate}
+          disabled={complete.isPending}
+        />
+      ))}
     </>
   );
 }

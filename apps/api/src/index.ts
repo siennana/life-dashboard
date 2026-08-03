@@ -10,7 +10,8 @@ import { createExercise, listExercises, updateExercise } from "./exercise";
 import { createBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
-import { bookInputSchema, exerciseInputSchema } from "@life/shared";
+import { listPeriods, markPeriod } from "./period";
+import { bookInputSchema, exerciseInputSchema, periodMarkInputSchema } from "@life/shared";
 
 const app = Fastify({ logger: true });
 
@@ -118,6 +119,19 @@ app.get("/api/calendar/events", async (_req, reply) => {
       };
     }),
   };
+});
+
+// Period tracking: mark a day as period start/end (right-click on the
+// calendar), list all logged ranges.
+app.get("/api/period", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return { periods: await listPeriods(db) };
+});
+
+app.post("/api/period/mark", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const { date, kind } = periodMarkInputSchema.parse(req.body);
+  return markPeriod(db, date, kind);
 });
 
 // Exercise: manually log a workout / list all logged workouts.

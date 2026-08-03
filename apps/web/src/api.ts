@@ -6,6 +6,9 @@ import type {
   ExerciseInput,
   ExerciseRow,
   ExercisesResponse,
+  PeriodEntry,
+  PeriodMarkInput,
+  PeriodsResponse,
   PortfolioResponse,
   StatusResponse,
   UploadResponse,
@@ -125,4 +128,19 @@ export async function updateExercise(id: number, input: ExerciseInput): Promise<
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json() as Promise<ExerciseRow>;
+}
+
+export const getPeriods = () => apiFetch<PeriodsResponse>("/api/period");
+
+export async function markPeriod(input: PeriodMarkInput): Promise<PeriodEntry> {
+  const res = await fetch("/api/period/mark", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<PeriodEntry>;
 }
