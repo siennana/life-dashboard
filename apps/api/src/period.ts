@@ -1,106 +1,46 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { events, type Db } from "@life/db";
-import type { PeriodEntry } from "@life/shared";
+import type { PeriodToggleResult } from "@life/shared";
 
-// Menstrual cycle ranges live in the generic `events` table: source "manual",
-// type "period". startTs/endTs (both already nullable-endTs columns) hold the
-// range directly — no payload needed. endTs null = period still ongoing.
-function toDayString(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function toRow(row: typeof events.$inferSelect): PeriodEntry {
-  return {
-    id: row.id,
-    startDate: toDayString(row.startTs),
-    endDate: row.endTs ? toDayString(row.endTs) : null,
-  };
-}
-
-// Noon UTC keeps the entry on the intended calendar day regardless of TZ.
+// Menstrual cycle tracking: each menstruating day is one row in the generic
+// `events` table (source "manual", type "period"), keyed by that day's date.
+// No ranges — a day is either marked or not.
 const toNoonUtc = (date: string) => new Date(`${date}T12:00:00Z`);
+const toDayString = (d: Date) => d.toISOString().slice(0, 10);
 
-async function findOpenPeriod(db: Db) {
+async function findDay(db: Db, date: string) {
   const rows = await db
     .select()
     .from(events)
-    .where(and(eq(events.source, "manual"), eq(events.type, "period"), isNull(events.endTs)))
-    .orderBy(desc(events.startTs))
+    .where(and(eq(events.source, "manual"), eq(events.type, "period"), eq(events.startTs, toNoonUtc(date))))
     .limit(1);
   return rows[0] ?? null;
 }
 
-export async function markPeriod(
-  db: Db,
-  date: string,
-  kind: "start" | "end",
-): Promise<PeriodEntry> {
-  const open = await findOpenPeriod(db);
-
-  if (kind === "start") {
-    if (open) {
-      const updated = (
-        await db
-          .update(events)
-          .set({ startTs: toNoonUtc(date), updatedAt: new Date() })
-          .where(eq(events.id, open.id))
-          .returning()
-      )[0]!;
-      return toRow(updated);
-    }
-    const created = (
-      await db
-        .insert(events)
-        .values({
-          source: "manual",
-          externalId: randomUUID(),
-          type: "period",
-          startTs: toNoonUtc(date),
-          endTs: null,
-        })
-        .returning()
-    )[0]!;
-    return toRow(created);
+// Toggle a single day's menstruating flag: delete the row if it exists, else
+// insert one. Returns the resulting marked state.
+export async function togglePeriodDay(db: Db, date: string): Promise<PeriodToggleResult> {
+  const existing = await findDay(db, date);
+  if (existing) {
+    await db.delete(events).where(eq(events.id, existing.id));
+    return { date, marked: false };
   }
-
-  // kind === "end"
-  if (!open) {
-    // No open period to close — log a single-day period at this date.
-    const created = (
-      await db
-        .insert(events)
-        .values({
-          source: "manual",
-          externalId: randomUUID(),
-          type: "period",
-          startTs: toNoonUtc(date),
-          endTs: toNoonUtc(date),
-        })
-        .returning()
-    )[0]!;
-    return toRow(created);
-  }
-
-  // Marking "end" before the open period's start swaps the two, so the range
-  // stays chronological regardless of click order.
-  const startDate = toDayString(open.startTs);
-  const [newStart, newEnd] = date < startDate ? [date, startDate] : [startDate, date];
-  const updated = (
-    await db
-      .update(events)
-      .set({ startTs: toNoonUtc(newStart), endTs: toNoonUtc(newEnd), updatedAt: new Date() })
-      .where(eq(events.id, open.id))
-      .returning()
-  )[0]!;
-  return toRow(updated);
+  await db.insert(events).values({
+    source: "manual",
+    externalId: randomUUID(),
+    type: "period",
+    startTs: toNoonUtc(date),
+    endTs: null,
+  });
+  return { date, marked: true };
 }
 
-export async function listPeriods(db: Db): Promise<PeriodEntry[]> {
+// All menstruating days, as sorted YYYY-MM-DD strings.
+export async function listPeriodDays(db: Db): Promise<string[]> {
   const rows = await db
     .select()
     .from(events)
-    .where(and(eq(events.source, "manual"), eq(events.type, "period")))
-    .orderBy(desc(events.startTs));
-  return rows.map(toRow);
+    .where(and(eq(events.source, "manual"), eq(events.type, "period")));
+  return rows.map((r) => toDayString(r.startTs)).sort();
 }

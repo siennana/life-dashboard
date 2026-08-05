@@ -7,9 +7,9 @@ import type {
   ExerciseInput,
   ExerciseRow,
   ExercisesResponse,
-  PeriodEntry,
-  PeriodMarkInput,
   PeriodsResponse,
+  PeriodToggleInput,
+  PeriodToggleResult,
   PortfolioResponse,
   StatusResponse,
   UploadResponse,
@@ -133,8 +133,8 @@ export async function updateExercise(id: number, input: ExerciseInput): Promise<
 
 export const getPeriods = () => apiFetch<PeriodsResponse>("/api/period");
 
-export async function markPeriod(input: PeriodMarkInput): Promise<PeriodEntry> {
-  const res = await fetch("/api/period/mark", {
+export async function togglePeriodDay(input: PeriodToggleInput): Promise<PeriodToggleResult> {
+  const res = await fetch("/api/period/toggle", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
@@ -143,7 +143,7 @@ export async function markPeriod(input: PeriodMarkInput): Promise<PeriodEntry> {
     body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error(await errorMessage(res));
-  return res.json() as Promise<PeriodEntry>;
+  return res.json() as Promise<PeriodToggleResult>;
 }
 
 export const getDayLog = (date: string) => apiFetch<CalendarDayLog>(`/api/calendar/day/${date}`);

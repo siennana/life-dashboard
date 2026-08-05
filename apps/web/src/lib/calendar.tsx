@@ -21,6 +21,23 @@ export const eventLabel = (e: CalendarEvent) =>
     ? e.title
     : `${new Date(e.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${e.title}`;
 
+// Calendar events on one local day, split into all-day and timed (timed sorted
+// by start). Shares the ["calendar-events"] query — no extra fetch.
+export function useCalendarEventsOn(date: string) {
+  const events = useQuery({ queryKey: ["calendar-events"], queryFn: getCalendarEvents });
+  return useMemo(() => {
+    const allDay: CalendarEvent[] = [];
+    const timed: CalendarEvent[] = [];
+    for (const e of events.data?.events ?? []) {
+      const d = new Date(e.start);
+      if (dateKey(d.getFullYear(), d.getMonth(), d.getDate()) !== date) continue;
+      (e.allDay ? allDay : timed).push(e);
+    }
+    timed.sort((a, b) => a.start.localeCompare(b.start));
+    return { allDay, timed };
+  }, [events.data, date]);
+}
+
 // Fetches exercises + iCloud events once (React Query dedupes across mounts)
 // and groups both by YYYY-MM-DD.
 export function useDayData() {

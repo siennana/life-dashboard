@@ -192,25 +192,22 @@ export const weatherResponseSchema = z.object({
 });
 export type WeatherResponse = z.infer<typeof weatherResponseSchema>;
 
-// Menstrual cycle tracking — manually logged period ranges. A period entry has
-// a start date and, once ended, an end date; `endDate: null` means ongoing.
-// Marking "start"/"end" on a day (right-click on the calendar) either updates
-// the currently-open period or starts a new one.
-export const periodMarkInputSchema = z.object({
+// Menstrual cycle tracking — each menstruating day is toggled independently
+// (right-click a calendar day). No start/end range logic; the data is just the
+// set of dates marked as menstruating.
+export const periodToggleInputSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected date as YYYY-MM-DD"),
-  kind: z.enum(["start", "end"]),
 });
-export type PeriodMarkInput = z.infer<typeof periodMarkInputSchema>;
+export type PeriodToggleInput = z.infer<typeof periodToggleInputSchema>;
 
-export const periodEntrySchema = z.object({
-  id: z.number(),
-  startDate: z.string(),
-  endDate: z.string().nullable(),
+export const periodToggleResultSchema = z.object({
+  date: z.string(),
+  marked: z.boolean(),
 });
-export type PeriodEntry = z.infer<typeof periodEntrySchema>;
+export type PeriodToggleResult = z.infer<typeof periodToggleResultSchema>;
 
 export const periodsResponseSchema = z.object({
-  periods: z.array(periodEntrySchema),
+  days: z.array(z.string()), // YYYY-MM-DD
 });
 export type PeriodsResponse = z.infer<typeof periodsResponseSchema>;
 

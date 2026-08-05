@@ -10,12 +10,12 @@ import { createExercise, listExercises, updateExercise } from "./exercise";
 import { createBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
-import { listPeriods, markPeriod } from "./period";
+import { listPeriodDays, togglePeriodDay } from "./period";
 import { getDayLog, saveDayLog } from "./calendarDay";
 import {
   bookInputSchema,
   exerciseInputSchema,
-  periodMarkInputSchema,
+  periodToggleInputSchema,
   saveDayLogInputSchema,
 } from "@life/shared";
 
@@ -145,17 +145,17 @@ app.put("/api/calendar/day/:date", async (req, reply) => {
   return saveDayLog(db, date, log.trim() || null);
 });
 
-// Period tracking: mark a day as period start/end (right-click on the
-// calendar), list all logged ranges.
+// Period tracking: toggle a day as menstruating (right-click on the calendar),
+// list all menstruating days.
 app.get("/api/period", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
-  return { periods: await listPeriods(db) };
+  return { days: await listPeriodDays(db) };
 });
 
-app.post("/api/period/mark", async (req, reply) => {
+app.post("/api/period/toggle", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
-  const { date, kind } = periodMarkInputSchema.parse(req.body);
-  return markPeriod(db, date, kind);
+  const { date } = periodToggleInputSchema.parse(req.body);
+  return togglePeriodDay(db, date);
 });
 
 // Exercise: manually log a workout / list all logged workouts.
