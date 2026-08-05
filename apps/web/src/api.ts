@@ -2,6 +2,7 @@ import type {
   BookInput,
   BookRow,
   BooksResponse,
+  CalendarDayLog,
   CalendarEventsResponse,
   ExerciseInput,
   ExerciseRow,
@@ -143,4 +144,19 @@ export async function markPeriod(input: PeriodMarkInput): Promise<PeriodEntry> {
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json() as Promise<PeriodEntry>;
+}
+
+export const getDayLog = (date: string) => apiFetch<CalendarDayLog>(`/api/calendar/day/${date}`);
+
+export async function saveDayLog(date: string, log: string): Promise<CalendarDayLog> {
+  const res = await fetch(`/api/calendar/day/${date}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ log }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<CalendarDayLog>;
 }

@@ -9,6 +9,7 @@ import type { ExerciseInput, ExerciseRow, ExerciseType } from "@life/shared";
 type ExercisePayload = {
   exerciseType: ExerciseType;
   date: string;
+  time: string | null; // HH:MM, local — display/sort only, doesn't affect startTs
   totalTime: number | null;
   distanceMiles: number | null;
   caloriesBurned: number | null;
@@ -20,6 +21,7 @@ function toRow(row: typeof events.$inferSelect): ExerciseRow {
     id: row.id,
     type: (p.exerciseType ?? "custom") as ExerciseType,
     date: p.date ?? row.startTs.toISOString().slice(0, 10),
+    time: p.time ?? null,
     description: row.title,
     totalTime: p.totalTime ?? null,
     distanceMiles: p.distanceMiles ?? null,
@@ -32,6 +34,7 @@ export async function createExercise(db: Db, input: ExerciseInput): Promise<Exer
   const payload: ExercisePayload = {
     exerciseType: input.type,
     date: input.date,
+    time: input.time ?? null,
     totalTime: input.totalTime ?? null,
     distanceMiles: input.distanceMiles ?? null,
     caloriesBurned: input.caloriesBurned ?? null,
@@ -63,6 +66,7 @@ export async function updateExercise(
   const payload: ExercisePayload = {
     exerciseType: input.type,
     date: input.date,
+    time: input.time ?? null,
     totalTime: input.totalTime ?? null,
     distanceMiles: input.distanceMiles ?? null,
     caloriesBurned: input.caloriesBurned ?? null,
@@ -85,8 +89,16 @@ export async function listExercises(db: Db): Promise<ExerciseRow[]> {
     .select()
     .from(events)
     .where(and(eq(events.source, "manual"), eq(events.type, "exercise")));
-  // Workout date descending (most recent first); same-day ties newest-logged first.
-  return rows
-    .map(toRow)
-    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+  // Workout date descending (most recent first); same-day ties break on time
+  // of day descending (untimed entries sort after timed ones, via "" < any
+  // "HH:MM"), then on newest-logged. Fixed two-key comparator — always the
+  // same criteria regardless of which rows are being compared, so the sort
+  // stays transitive.
+  return rows.map(toRow).sort((a, b) => {
+    const byDate = b.date.localeCompare(a.date);
+    if (byDate !== 0) return byDate;
+    const byTime = (b.time ?? "").localeCompare(a.time ?? "");
+    if (byTime !== 0) return byTime;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
 }

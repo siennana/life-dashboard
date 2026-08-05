@@ -25,6 +25,14 @@ const prettyDate = (d: string) =>
     year: "numeric",
   });
 
+// "09:00" -> "9:00 AM"
+const prettyTime = (t: string) => {
+  const [h, m] = t.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h ?? 0, m ?? 0, 0, 0);
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+};
+
 const fieldClass =
   "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none";
 
@@ -40,6 +48,7 @@ function LogForm({
   const queryClient = useQueryClient();
   const [type, setType] = useState<ExerciseType>("run");
   const [date, setDate] = useState(today());
+  const [time, setTime] = useState("");
   const [description, setDescription] = useState("");
   const [totalTime, setTotalTime] = useState("");
   const [distance, setDistance] = useState("");
@@ -48,6 +57,7 @@ function LogForm({
   function clearForm() {
     setType("run");
     setDate(today());
+    setTime("");
     setDescription("");
     setTotalTime("");
     setDistance("");
@@ -59,6 +69,7 @@ function LogForm({
     if (!editing) return;
     setType(editing.type);
     setDate(editing.date);
+    setTime(editing.time ?? "");
     setDescription(editing.description ?? "");
     setTotalTime(editing.totalTime != null ? String(editing.totalTime) : "");
     setDistance(editing.distanceMiles != null ? String(editing.distanceMiles) : "");
@@ -80,6 +91,7 @@ function LogForm({
     const input: ExerciseInput = {
       type,
       date,
+      ...(time !== "" ? { time } : {}),
       ...(description.trim() ? { description: description.trim() } : {}),
       ...(totalTime !== "" ? { totalTime: Number(totalTime) } : {}),
       ...(distance !== "" ? { distanceMiles: Number(distance) } : {}),
@@ -111,16 +123,27 @@ function LogForm({
             ))}
           </select>
         </label>
-        <label className="block">
-          <span className="text-xs text-zinc-500">Date *</span>
-          <input
-            type="date"
-            required
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className={`${fieldClass} mt-1`}
-          />
-        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-xs text-zinc-500">Date *</span>
+            <input
+              type="date"
+              required
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className={`${fieldClass} mt-1`}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-zinc-500">Time</span>
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className={`${fieldClass} mt-1`}
+            />
+          </label>
+        </div>
         <label className="block sm:col-span-2">
           <span className="text-xs text-zinc-500">Log</span>
           <input
@@ -292,9 +315,10 @@ export function Exercise() {
               <thead>
                 <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
                   <th className="px-4 py-3 font-medium">Date</th>
+                  <th className="px-4 py-3 font-medium">Time</th>
                   <th className="px-4 py-3 font-medium">Type</th>
                   <th className="px-4 py-3 font-medium">Log</th>
-                  <th className="px-4 py-3 text-right font-medium">Time</th>
+                  <th className="px-4 py-3 text-right font-medium">Duration</th>
                   <th className="px-4 py-3 text-right font-medium">Distance</th>
                   <th className="px-4 py-3 text-right font-medium">Calories</th>
                   <th className="px-4 py-3" />
@@ -312,6 +336,9 @@ export function Exercise() {
                       >
                         <td className="whitespace-nowrap px-4 py-3 text-zinc-300">
                           {prettyDate(r.date)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-zinc-300">
+                          {r.time == null ? "—" : prettyTime(r.time)}
                         </td>
                         <td className="px-4 py-3">
                           <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs capitalize text-zinc-200">
@@ -340,7 +367,7 @@ export function Exercise() {
                       </tr>
                       {isEditing && (
                         <tr className="bg-zinc-800/40">
-                          <td colSpan={7} className="p-0">
+                          <td colSpan={8} className="p-0">
                             <SlideDown open={!closing}>
                               <div className="px-3 pb-3">
                                 <LogForm inline editing={r} onDone={closeEdit} />

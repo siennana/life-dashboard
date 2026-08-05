@@ -53,3 +53,19 @@ export const syncRuns = pgTable("sync_runs", {
   error: text("error"),
   cursor: text("cursor"),
 });
+
+// One row per calendar day, holding whatever's attached to that day in the
+// calendar's day-detail form. Only `log` (free text) is implemented so far;
+// todos/schedule are placeholders in the UI and will get their own columns
+// (or relations) here once built.
+export const calendarDays = pgTable(
+  "calendar_days",
+  {
+    id: serial("id").primaryKey(),
+    date: date("date").notNull(),
+    log: text("log"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("calendar_days_date").on(t.date)],
+);

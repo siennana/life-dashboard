@@ -4,6 +4,7 @@ import { getWeather, markPeriod } from "../api";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
 import { weatherEmoji } from "../lib/weather";
 import { usePeriodDays } from "../lib/period";
+import { DayForm } from "../components/DayForm";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -241,6 +242,58 @@ export function CalendarPage() {
                     const isDaySqueezed = isExpanded && expandedDay !== null && !isDayExpanded;
                     const wx = wi === currentWeekIndex ? weatherByDay.get(key) : undefined;
                     const isPeriod = periodDays.has(key);
+                    const dayNumberClass = `inline-flex shrink-0 items-center justify-center rounded-full ${
+                      isCompressed ? "h-4 w-4 text-[10px]" : "h-6 w-6 text-xs"
+                    } ${
+                      isPeriod && isToday
+                        ? "bg-red-600 font-semibold text-white ring-2 ring-emerald-400"
+                        : isPeriod
+                          ? "bg-red-600 font-semibold text-white"
+                          : isToday
+                            ? "bg-emerald-600 font-semibold text-white"
+                            : cell.inMonth
+                              ? "text-zinc-300"
+                              : "text-zinc-600"
+                    }`;
+                    const weatherBadge = wx && !isCompressed && !isDaySqueezed && (
+                      <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-400">
+                        <span className="leading-none">{weatherEmoji(wx.code)}</span>
+                        <span className="tabular-nums">{wx.tempMax}°</span>
+                      </span>
+                    );
+
+                    // The expanded day hosts a form with real inputs (the log
+                    // textarea), which can't safely live inside a <button> — so
+                    // it renders as a div; only the day number toggles collapse.
+                    if (isDayExpanded) {
+                      return (
+                        <div
+                          key={key}
+                          onContextMenu={(e) => openContextMenu(e, key)}
+                          aria-label={key}
+                          className={`flex min-h-0 grow basis-0 flex-col overflow-hidden border-r border-zinc-800/60 p-1.5 text-left outline outline-2 -outline-offset-2 outline-blue-500 last:border-r-0 ${
+                            cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
+                          }`}
+                        >
+                          <div className="flex shrink-0 items-center justify-between gap-1">
+                            <button
+                              type="button"
+                              aria-label={`Collapse ${key}`}
+                              onClick={() => setExpandedDay(null)}
+                              className={`${dayNumberClass} hover:opacity-80`}
+                            >
+                              {cell.day}
+                            </button>
+                            {weatherBadge}
+                          </div>
+                          <div className="shrink-0">
+                            <DayChips dayEvents={dayEvents} entries={entries} />
+                          </div>
+                          <DayForm date={key} />
+                        </div>
+                      );
+                    }
+
                     return (
                       <button
                         type="button"
@@ -262,36 +315,11 @@ export function CalendarPage() {
                           isDaySqueezed ? "grow-0 basis-9" : "grow basis-0"
                         } ${isCompressed ? "p-0.5" : "p-1.5"} ${
                           cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
-                        } ${
-                          isDayExpanded
-                            ? "outline outline-2 -outline-offset-2 outline-blue-500"
-                            : ""
                         }`}
                       >
                         <div className="flex items-center justify-between gap-1">
-                          <span
-                            className={`inline-flex shrink-0 items-center justify-center rounded-full ${
-                              isCompressed ? "h-4 w-4 text-[10px]" : "h-6 w-6 text-xs"
-                            } ${
-                              isPeriod && isToday
-                                ? "bg-red-600 font-semibold text-white ring-2 ring-emerald-400"
-                                : isPeriod
-                                  ? "bg-red-600 font-semibold text-white"
-                                  : isToday
-                                    ? "bg-emerald-600 font-semibold text-white"
-                                    : cell.inMonth
-                                      ? "text-zinc-300"
-                                      : "text-zinc-600"
-                            }`}
-                          >
-                            {cell.day}
-                          </span>
-                          {wx && !isCompressed && !isDaySqueezed && (
-                            <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-400">
-                              <span className="leading-none">{weatherEmoji(wx.code)}</span>
-                              <span className="tabular-nums">{wx.tempMax}°</span>
-                            </span>
-                          )}
+                          <span className={dayNumberClass}>{cell.day}</span>
+                          {weatherBadge}
                         </div>
                         <DayChips dayEvents={dayEvents} entries={entries} />
                       </button>

@@ -1,4 +1,5 @@
-import type { TodoRow } from "../api";
+import { useQuery } from "@tanstack/react-query";
+import { getTodos, type TodoRow } from "../api";
 
 // Shared todo helpers, used by the Todos page and the Home "due & overdue"
 // widget so the due-date logic and rendering live once.
@@ -21,6 +22,16 @@ export function compareTodos(a: TodoRow, b: TodoRow): number {
   if (da) return -1;
   if (db) return 1;
   return addedOf(a).localeCompare(addedOf(b));
+}
+
+// Open todos due on a specific day (used by the calendar's day-detail form).
+// Shares the ["todos"] query with the Todos page/widget — no extra fetch.
+export function useTodosDueOn(date: string) {
+  const todos = useQuery({ queryKey: ["todos"], queryFn: getTodos });
+  const due = (todos.data?.todos ?? [])
+    .filter((t) => t.payload?.status !== "completed" && dueOf(t) === date)
+    .sort(compareTodos);
+  return { due, todos };
 }
 
 // The complete-todo circle, shared by the Todos page and the Home widget.

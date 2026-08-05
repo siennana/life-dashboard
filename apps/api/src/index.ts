@@ -11,7 +11,13 @@ import { createBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
 import { listPeriods, markPeriod } from "./period";
-import { bookInputSchema, exerciseInputSchema, periodMarkInputSchema } from "@life/shared";
+import { getDayLog, saveDayLog } from "./calendarDay";
+import {
+  bookInputSchema,
+  exerciseInputSchema,
+  periodMarkInputSchema,
+  saveDayLogInputSchema,
+} from "@life/shared";
 
 const app = Fastify({ logger: true });
 
@@ -119,6 +125,24 @@ app.get("/api/calendar/events", async (_req, reply) => {
       };
     }),
   };
+});
+
+const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
+
+// Calendar day detail: the free-text log for a day's expanded-cell form.
+app.get("/api/calendar/day/:date", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const { date } = req.params as { date: string };
+  if (!DATE_PARAM.test(date)) return reply.code(400).send({ error: "invalid date - expected YYYY-MM-DD" });
+  return getDayLog(db, date);
+});
+
+app.put("/api/calendar/day/:date", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const { date } = req.params as { date: string };
+  if (!DATE_PARAM.test(date)) return reply.code(400).send({ error: "invalid date - expected YYYY-MM-DD" });
+  const { log } = saveDayLogInputSchema.parse(req.body);
+  return saveDayLog(db, date, log.trim() || null);
 });
 
 // Period tracking: mark a day as period start/end (right-click on the

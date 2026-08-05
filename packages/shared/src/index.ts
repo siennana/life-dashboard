@@ -88,6 +88,7 @@ export type ExerciseType = z.infer<typeof exerciseTypeSchema>;
 export const exerciseInputSchema = z.object({
   type: exerciseTypeSchema,
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected date as YYYY-MM-DD"),
+  time: z.string().regex(/^\d{2}:\d{2}$/, "expected time as HH:MM").optional(),
   description: z.string().trim().max(2000).optional(),
   totalTime: z.number().nonnegative().optional(), // minutes
   distanceMiles: z.number().nonnegative().optional(),
@@ -99,6 +100,7 @@ export const exerciseRowSchema = z.object({
   id: z.number(),
   type: exerciseTypeSchema,
   date: z.string(),
+  time: z.string().nullable(),
   description: z.string().nullable(),
   totalTime: z.number().nullable(),
   distanceMiles: z.number().nullable(),
@@ -211,3 +213,16 @@ export const periodsResponseSchema = z.object({
   periods: z.array(periodEntrySchema),
 });
 export type PeriodsResponse = z.infer<typeof periodsResponseSchema>;
+
+// Calendar day-detail form (expanded day cell): only the log field is
+// implemented; todos/schedule are UI placeholders for now.
+export const calendarDayLogSchema = z.object({
+  date: z.string(),
+  log: z.string().nullable(),
+});
+export type CalendarDayLog = z.infer<typeof calendarDayLogSchema>;
+
+export const saveDayLogInputSchema = z.object({
+  log: z.string().max(20000),
+});
+export type SaveDayLogInput = z.infer<typeof saveDayLogInputSchema>;
