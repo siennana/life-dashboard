@@ -278,26 +278,53 @@ app.put("/api/books/:id", async (req, reply) => {
   return row;
 });
 
+// The connectors that can be synced on demand, keyed by their sync_runs source.
+const SYNCABLE_SOURCES = ["todoist", "calendar", "plaid"] as const;
+type SyncableSource = (typeof SYNCABLE_SOURCES)[number];
+
+// Run one connector by its source key. Returns the connector's own result, or a
+// { skipped } marker when its creds aren't configured. May throw (the caller
+// decides whether to degrade to { error }).
+function runConnector(activeDb: NonNullable<typeof db>, source: SyncableSource): Promise<unknown> {
+  switch (source) {
+    case "todoist":
+      return config.todoistApiToken
+        ? syncTodoist(activeDb, config.todoistApiToken)
+        : Promise.resolve({ skipped: "not configured" });
+    case "calendar":
+      return config.icloudEmail && config.icloudAppPassword
+        ? syncICloud(activeDb, config.icloudEmail, config.icloudAppPassword)
+        : Promise.resolve({ skipped: "not configured" });
+    case "plaid": {
+      const creds = plaidCreds();
+      return creds && config.plaidAccessToken
+        ? syncPlaid(activeDb, creds, config.plaidAccessToken)
+        : Promise.resolve({ skipped: "not configured" });
+    }
+  }
+}
+
 app.post("/api/sync", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   const results: Record<string, unknown> = {};
-  results.todoist = config.todoistApiToken
-    ? await syncTodoist(db, config.todoistApiToken).catch((err) => ({ error: String(err) }))
-    : { skipped: "not configured" };
-  results.calendar =
-    config.icloudEmail && config.icloudAppPassword
-      ? await syncICloud(db, config.icloudEmail, config.icloudAppPassword).catch((err) => ({
-          error: String(err),
-        }))
-      : { skipped: "not configured" };
-  const creds = plaidCreds();
-  results.plaid =
-    creds && config.plaidAccessToken
-      ? await syncPlaid(db, creds, config.plaidAccessToken).catch((err) => ({
-          error: String(err),
-        }))
-      : { skipped: "not configured" };
+  for (const source of SYNCABLE_SOURCES) {
+    results[source] = await runConnector(db, source).catch((err) => ({ error: String(err) }));
+  }
   return results;
+});
+
+// Sync a single connector on demand (Sync buttons on the Todos page / Sync
+// status widget). Writes straight to the live DB (Neon), same as the 5-min loop.
+app.post("/api/sync/:source", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const source = (req.params as { source: string }).source;
+  if (!SYNCABLE_SOURCES.includes(source as SyncableSource)) {
+    return reply.code(404).send({ error: `unknown sync source: ${source}` });
+  }
+  const result = await runConnector(db, source as SyncableSource).catch((err) => ({
+    error: String(err),
+  }));
+  return { source, result };
 });
 
 // postgres.js wraps connection failures in a `cause` chain rather than the

@@ -86,6 +86,16 @@ export async function clearCompletedTodos(): Promise<number> {
   return body.deleted;
 }
 
+// Sync one connector on demand (Todos + Sync status buttons). Returns the
+// connector's raw result; callers refetch ["status"] and the source's data.
+export async function syncSource(source: string): Promise<void> {
+  const res = await fetch(`/api/sync/${source}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}` },
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+}
+
 export const getPortfolio = () => apiFetch<PortfolioResponse>("/api/finance/portfolio");
 
 export async function uploadHoldings(csv: string): Promise<UploadResponse> {

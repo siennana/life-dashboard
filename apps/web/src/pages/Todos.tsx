@@ -6,9 +6,11 @@ import {
   deleteTodo,
   getStatusTimed,
   getTodos,
+  syncSource,
   type TodoRow,
 } from "../api";
 import { compareTodos, CompleteButton, DueDate } from "../lib/todos";
+import { RefreshIcon } from "../components/SyncStatus";
 
 const fmtDateTime = (d: string | Date) =>
   new Date(d).toLocaleString(undefined, {
@@ -179,6 +181,13 @@ export function Todos() {
     mutationFn: closeTodo,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
   });
+  const sync = useMutation({
+    mutationFn: () => syncSource("todoist"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      queryClient.invalidateQueries({ queryKey: ["status"] });
+    },
+  });
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
   // Open todos grouped by their Todoist list, each built into its own tree.
@@ -226,9 +235,21 @@ export function Todos() {
             day: "numeric",
           })}
         </p>
-        {lastSync && (
-          <p className="text-xs text-zinc-500">Last sync: {fmtDateTime(lastSync)}</p>
-        )}
+        <div className="flex items-center gap-3">
+          {lastSync && (
+            <p className="text-xs text-zinc-500">Last sync: {fmtDateTime(lastSync)}</p>
+          )}
+          <button
+            type="button"
+            onClick={() => sync.mutate()}
+            disabled={sync.isPending}
+            aria-label="Sync Todoist"
+            title="Sync Todoist"
+            className="cursor-pointer text-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshIcon spinning={sync.isPending} />
+          </button>
+        </div>
       </div>
 
       {todos.isPending && <p className="mt-3 text-zinc-400">Loading…</p>}
