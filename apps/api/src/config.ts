@@ -21,6 +21,10 @@ const envSchema = z.object({
   WEATHER_LOCATION: z.string().optional(),
   WEATHER_LATITUDE: z.coerce.number().optional(),
   WEATHER_LONGITUDE: z.coerce.number().optional(),
+  PLAID_CLIENT_ID: z.string().optional(),
+  PLAID_SECRET: z.string().optional(),
+  PLAID_ENV: z.enum(["sandbox", "production"]).default("production"),
+  PLAID_ACCESS_TOKEN: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -50,6 +54,11 @@ if (!env.FINNHUB_API_KEY) warnings.push("FINNHUB_API_KEY is not set - live price
 if (!env.ICLOUD_EMAIL || !env.ICLOUD_APP_PASSWORD) {
   warnings.push("ICLOUD_EMAIL / ICLOUD_APP_PASSWORD not set - calendar sync disabled");
 }
+if (!env.PLAID_CLIENT_ID || !env.PLAID_SECRET) {
+  warnings.push("PLAID_CLIENT_ID / PLAID_SECRET not set - bank spending sync disabled");
+} else if (!env.PLAID_ACCESS_TOKEN) {
+  warnings.push("PLAID_ACCESS_TOKEN not set - connect a bank at /plaid-link, then paste the token");
+}
 
 for (const w of warnings) console.warn(`[config] ${w}`);
 
@@ -65,5 +74,9 @@ export const config = {
   weatherLocation: env.WEATHER_LOCATION,
   weatherLatitude: env.WEATHER_LATITUDE,
   weatherLongitude: env.WEATHER_LONGITUDE,
+  plaidClientId: env.PLAID_CLIENT_ID,
+  plaidSecret: env.PLAID_SECRET,
+  plaidEnv: env.PLAID_ENV,
+  plaidAccessToken: env.PLAID_ACCESS_TOKEN,
   warnings,
 };

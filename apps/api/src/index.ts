@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { createDb, events } from "@life/db";
@@ -13,9 +13,16 @@ import { getWeather } from "./weather";
 import { listPeriodDays, togglePeriodDay } from "./period";
 import { getDayLog, saveDayLog } from "./calendarDay";
 import {
+  createLinkToken,
+  exchangePublicToken,
+  syncPlaid,
+  type PlaidCreds,
+} from "./connectors/plaid";
+import {
   bookInputSchema,
   exerciseInputSchema,
   periodToggleInputSchema,
+  plaidExchangeInputSchema,
   saveDayLogInputSchema,
 } from "@life/shared";
 
@@ -102,6 +109,92 @@ app.get("/api/finance/portfolio", async (_req, reply) => {
 
 // Weather: live 7-day forecast from Open-Meteo for the configured location.
 app.get("/api/weather", async () => getWeather(config));
+
+// Plaid credentials from .env, or null until both keys are set.
+function plaidCreds(): PlaidCreds | null {
+  if (!config.plaidClientId || !config.plaidSecret) return null;
+  return { clientId: config.plaidClientId, secret: config.plaidSecret, env: config.plaidEnv };
+}
+
+// Plaid one-time linking: mint a Link token, then exchange the public token
+// Link hands back. The resulting access token gets pasted into .env.
+app.post("/api/plaid/link-token", async (_req, reply) => {
+  const creds = plaidCreds();
+  if (!creds) {
+    return reply.code(503).send({ error: "PLAID_CLIENT_ID / PLAID_SECRET not configured" });
+  }
+  return createLinkToken(creds);
+});
+
+app.post("/api/plaid/exchange", async (req, reply) => {
+  const creds = plaidCreds();
+  if (!creds) {
+    return reply.code(503).send({ error: "PLAID_CLIENT_ID / PLAID_SECRET not configured" });
+  }
+  const { public_token } = plaidExchangeInputSchema.parse(req.body);
+  return exchangePublicToken(creds, public_token);
+});
+
+// Internal money movement, not real spending: account-to-account transfers,
+// moves into own investment/savings, and credit-card payments (the purchases
+// they pay off are already counted). Keyed on Plaid's detailed category;
+// LOAN_PAYMENTS_OTHER_PAYMENT is US Bank's card-payment categorization here.
+// Real external payments (Zelle/Venmo, student loans, rent) still count.
+const NON_SPEND_DETAILED = new Set([
+  "TRANSFER_OUT_ACCOUNT_TRANSFER",
+  "TRANSFER_OUT_WITHDRAWAL",
+  "TRANSFER_OUT_SAVINGS",
+  "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS",
+  "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+  "LOAN_PAYMENTS_OTHER_PAYMENT",
+]);
+
+// Recent bank transactions + current-month spend (Plaid: positive = money out).
+app.get("/api/finance/spending", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const rows = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.source, "plaid"), eq(events.type, "transaction")))
+    .orderBy(desc(events.startTs))
+    .limit(100);
+  const month = new Date().toISOString().slice(0, 7);
+  const detailedById = new Map<number, string | null>();
+  const transactions = rows.map((r) => {
+    const p = (r.payload ?? {}) as {
+      amount?: number;
+      pending?: boolean;
+      category?: string | null;
+      categoryDetailed?: string | null;
+    };
+    detailedById.set(r.id, p.categoryDetailed ?? null);
+    return {
+      id: r.id,
+      date: r.startTs.toISOString().slice(0, 10),
+      name: r.title ?? "(unknown)",
+      amount: p.amount ?? 0,
+      category: p.category ?? null,
+      pending: p.pending ?? false,
+    };
+  });
+  const monthSpend = transactions
+    .filter((t) => {
+      const detailed = detailedById.get(t.id);
+      return (
+        t.date.startsWith(month) &&
+        t.amount > 0 &&
+        !(detailed && NON_SPEND_DETAILED.has(detailed))
+      );
+    })
+    .reduce((sum, t) => sum + t.amount, 0);
+  return {
+    configured: plaidCreds() != null,
+    linked: Boolean(config.plaidAccessToken),
+    transactions,
+    month,
+    monthSpend,
+  };
+});
 
 // Calendar: events synced read-only from iCloud, ordered by start time.
 app.get("/api/calendar/events", async (_req, reply) => {
@@ -214,6 +307,13 @@ app.post("/api/sync", async (_req, reply) => {
           error: String(err),
         }))
       : { skipped: "not configured" };
+  const creds = plaidCreds();
+  results.plaid =
+    creds && config.plaidAccessToken
+      ? await syncPlaid(db, creds, config.plaidAccessToken).catch((err) => ({
+          error: String(err),
+        }))
+      : { skipped: "not configured" };
   return results;
 });
 
@@ -266,6 +366,14 @@ async function runSyncs() {
         await syncICloud(activeDb, config.icloudEmail, config.icloudAppPassword);
       } catch (err) {
         app.log.error({ err }, "icloud calendar sync failed");
+      }
+    }
+    const creds = plaidCreds();
+    if (creds && config.plaidAccessToken) {
+      try {
+        await syncPlaid(activeDb, creds, config.plaidAccessToken);
+      } catch (err) {
+        app.log.error({ err }, "plaid sync failed");
       }
     }
   } finally {

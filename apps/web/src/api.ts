@@ -11,6 +11,7 @@ import type {
   PeriodToggleInput,
   PeriodToggleResult,
   PortfolioResponse,
+  SpendingResponse,
   StatusResponse,
   UploadResponse,
   WeatherResponse,
@@ -147,6 +148,29 @@ export async function togglePeriodDay(input: PeriodToggleInput): Promise<PeriodT
 }
 
 export const getDayLog = (date: string) => apiFetch<CalendarDayLog>(`/api/calendar/day/${date}`);
+
+export const getSpending = () => apiFetch<SpendingResponse>("/api/finance/spending");
+
+async function apiPost<T>(path: string, body: object): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<T>;
+}
+
+export const createPlaidLinkToken = () =>
+  apiPost<{ link_token: string }>("/api/plaid/link-token", {});
+
+export const exchangePlaidToken = (publicToken: string) =>
+  apiPost<{ access_token: string; item_id: string }>("/api/plaid/exchange", {
+    public_token: publicToken,
+  });
 
 export async function saveDayLog(date: string, log: string): Promise<CalendarDayLog> {
   const res = await fetch(`/api/calendar/day/${date}`, {

@@ -211,6 +211,32 @@ export const periodsResponseSchema = z.object({
 });
 export type PeriodsResponse = z.infer<typeof periodsResponseSchema>;
 
+// Bank spending via Plaid (read-only). Transactions land in `events` (source
+// "plaid"); amounts follow Plaid's sign convention: positive = money out.
+export const plaidExchangeInputSchema = z.object({
+  public_token: z.string().min(10),
+});
+export type PlaidExchangeInput = z.infer<typeof plaidExchangeInputSchema>;
+
+export const spendingTransactionSchema = z.object({
+  id: z.number(),
+  date: z.string(), // YYYY-MM-DD
+  name: z.string(),
+  amount: z.number(),
+  category: z.string().nullable(),
+  pending: z.boolean(),
+});
+export type SpendingTransaction = z.infer<typeof spendingTransactionSchema>;
+
+export const spendingResponseSchema = z.object({
+  configured: z.boolean(),
+  linked: z.boolean(),
+  transactions: z.array(spendingTransactionSchema),
+  month: z.string(), // YYYY-MM
+  monthSpend: z.number(),
+});
+export type SpendingResponse = z.infer<typeof spendingResponseSchema>;
+
 // Calendar day-detail form (expanded day cell): only the log field is
 // implemented; todos/schedule are UI placeholders for now.
 export const calendarDayLogSchema = z.object({

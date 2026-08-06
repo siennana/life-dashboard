@@ -18,7 +18,7 @@ export function FinanceWidget() {
     <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Portfolio</h2>
-        <Link to="/finance" className="text-xs text-zinc-500 hover:text-zinc-300">
+        <Link to="/finance/stocks" className="text-xs text-zinc-500 hover:text-zinc-300">
           Full portfolio →
         </Link>
       </div>

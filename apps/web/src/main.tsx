@@ -4,13 +4,16 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import App from "./App";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { NAV_ITEMS } from "./nav";
+import { ALL_NAV_ITEMS } from "./nav";
+import { Bank } from "./pages/Bank";
 import { CalendarPage } from "./pages/Calendar";
 import { Exercise } from "./pages/Exercise";
 import { Home } from "./pages/Home";
 import { Finance } from "./pages/Finance";
 import { Placeholder } from "./pages/Placeholder";
+import { PlaidLink } from "./pages/PlaidLink";
 import { Reading } from "./pages/Reading";
+import { Stocks } from "./pages/Stocks";
 import { Todos } from "./pages/Todos";
 import "./index.css";
 
@@ -29,9 +32,13 @@ createRoot(document.getElementById("root")!).render(
               <Route path="todos" element={<Todos />} />
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="finance" element={<Finance />} />
+              <Route path="finance/stocks" element={<Stocks />} />
+              <Route path="finance/bank" element={<Bank />} />
               <Route path="exercise" element={<Exercise />} />
               <Route path="reading" element={<Reading />} />
-              {NAV_ITEMS.filter((item) => !item.implemented).map((item) => (
+              {/* Hidden utility page for one-time Plaid bank linking. */}
+              <Route path="plaid-link" element={<PlaidLink />} />
+              {ALL_NAV_ITEMS.filter((item) => !item.implemented).map((item) => (
                 <Route
                   key={item.path}
                   path={item.path.slice(1)}
