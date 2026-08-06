@@ -11,6 +11,7 @@
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @life/db generate",
-    "db:migrate": "pnpm --filter @life/db migrate"
+    "db:migrate": "pnpm --filter @life/db migrate",
+    "db:copy-to-neon": "node --env-file=.env scripts/db-copy-to-neon.mjs"
   }
 }
