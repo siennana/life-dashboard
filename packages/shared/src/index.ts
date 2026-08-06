@@ -13,8 +13,18 @@ export const syncStatusSchema = z.object({
 });
 export type SyncStatus = z.infer<typeof syncStatusSchema>;
 
+// Live connectivity check against the Postgres backend (Neon), distinct from
+// sync_runs since the DB connection isn't a connector that runs on a schedule.
+export const dbStatusSchema = z.object({
+  status: z.enum(["ok", "error"]),
+  checkedAt: z.coerce.date(),
+  error: z.string().nullable(),
+});
+export type DbStatus = z.infer<typeof dbStatusSchema>;
+
 export const statusResponseSchema = z.object({
   sources: z.array(syncStatusSchema),
+  database: dbStatusSchema,
 });
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 
@@ -225,17 +235,60 @@ export const spendingTransactionSchema = z.object({
   amount: z.number(),
   category: z.string().nullable(),
   pending: z.boolean(),
+  accountId: z.string().nullable(),
 });
 export type SpendingTransaction = z.infer<typeof spendingTransactionSchema>;
 
-export const spendingResponseSchema = z.object({
+// One month of the spending dashboard. `months` drives the month switcher;
+// spend figures exclude internal transfers / card payments (NON_SPEND rules in
+// the API) and are net of refunds.
+export const spendingAccountSchema = z.object({
+  accountId: z.string(),
+  name: z.string(),
+  mask: z.string().nullable(),
+  accountType: z.string().nullable(), // credit | depository | ...
+  subtype: z.string().nullable(),
+  balance: z.number().nullable(),
+  creditLimit: z.number().nullable(),
+  spend: z.number(), // selected month, this account
+  count: z.number(),
+});
+export type SpendingAccount = z.infer<typeof spendingAccountSchema>;
+
+export const recurringChargeSchema = z.object({
+  name: z.string(),
+  avgAmount: z.number(),
+  frequency: z.enum(["weekly", "biweekly", "monthly", "yearly"]),
+  count: z.number(),
+  lastDate: z.string(), // YYYY-MM-DD
+  nextExpected: z.string(), // YYYY-MM-DD
+  active: z.boolean(), // false once a due charge stopped showing up
+});
+export type RecurringCharge = z.infer<typeof recurringChargeSchema>;
+
+export const spendingDashboardSchema = z.object({
   configured: z.boolean(),
   linked: z.boolean(),
-  transactions: z.array(spendingTransactionSchema),
-  month: z.string(), // YYYY-MM
-  monthSpend: z.number(),
+  month: z.string(), // selected YYYY-MM
+  months: z.array(z.string()), // every month with data, newest first
+  summary: z.object({
+    spend: z.number(), // net of refunds
+    income: z.number(),
+    refunds: z.number(),
+    txCount: z.number(),
+    pendingCount: z.number(),
+    prevMonthSpend: z.number().nullable(),
+    projected: z.number().nullable(), // spend pace * days-in-month; current month only
+  }),
+  trend: z.array(z.object({ month: z.string(), spend: z.number(), income: z.number() })),
+  daily: z.array(z.object({ date: z.string(), spend: z.number(), cumulative: z.number() })),
+  categories: z.array(z.object({ category: z.string(), spend: z.number(), count: z.number() })),
+  accounts: z.array(spendingAccountSchema),
+  merchants: z.array(z.object({ name: z.string(), spend: z.number(), count: z.number() })),
+  recurring: z.array(recurringChargeSchema),
+  transactions: z.array(spendingTransactionSchema), // selected month, newest first
 });
-export type SpendingResponse = z.infer<typeof spendingResponseSchema>;
+export type SpendingDashboard = z.infer<typeof spendingDashboardSchema>;
 
 // Calendar day-detail form (expanded day cell): only the log field is
 // implemented; todos/schedule are UI placeholders for now.

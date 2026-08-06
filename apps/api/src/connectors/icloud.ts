@@ -3,8 +3,8 @@ import { createDAVClient } from "tsdav";
 import ical, { type VEvent } from "node-ical";
 import { events, syncRuns, type Db } from "@life/db";
 
-// Read-only pull from iCloud over CalDAV (app-specific password — no public
-// ICS links, Sienna's events carry locations). We sync a rolling window and
+// Read-only pull from iCloud over CalDAV (app-specific password — never public
+// ICS links, since events can carry locations). We sync a rolling window and
 // prune anything in the window that iCloud no longer reports.
 const PAST_DAYS = 90;
 const FUTURE_DAYS = 365;

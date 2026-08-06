@@ -12,6 +12,7 @@ import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
 import { listPeriodDays, togglePeriodDay } from "./period";
 import { getDayLog, saveDayLog } from "./calendarDay";
+import { buildSpendingDashboard } from "./spending";
 import {
   createLinkToken,
   exchangePublicToken,
@@ -63,7 +64,7 @@ app.get("/health", async () => {
   }
 });
 
-// Latest sync run per source — powers the sync-status widget.
+// Latest sync run per source, plus a live DB ping — powers the sync-status widget.
 app.get("/api/status", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   const rows = await db.execute(sql`
@@ -71,7 +72,14 @@ app.get("/api/status", async (_req, reply) => {
     from sync_runs
     order by source, started_at desc
   `);
-  return { sources: rows };
+  let database: { status: "ok" | "error"; checkedAt: Date; error: string | null };
+  try {
+    await db.execute(sql`select 1`);
+    database = { status: "ok", checkedAt: new Date(), error: null };
+  } catch (err) {
+    database = { status: "error", checkedAt: new Date(), error: String(err) };
+  }
+  return { sources: rows, database };
 });
 
 app.get("/api/todos", async (_req, reply) => {
@@ -159,65 +167,16 @@ app.post("/api/plaid/exchange", async (req, reply) => {
   return exchangePublicToken(creds, public_token);
 });
 
-// Internal money movement, not real spending: account-to-account transfers,
-// moves into own investment/savings, and credit-card payments (the purchases
-// they pay off are already counted). Keyed on Plaid's detailed category;
-// LOAN_PAYMENTS_OTHER_PAYMENT is US Bank's card-payment categorization here.
-// Real external payments (Zelle/Venmo, student loans, rent) still count.
-const NON_SPEND_DETAILED = new Set([
-  "TRANSFER_OUT_ACCOUNT_TRANSFER",
-  "TRANSFER_OUT_WITHDRAWAL",
-  "TRANSFER_OUT_SAVINGS",
-  "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS",
-  "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
-  "LOAN_PAYMENTS_OTHER_PAYMENT",
-]);
-
-// Recent bank transactions + current-month spend (Plaid: positive = money out).
-app.get("/api/finance/spending", async (_req, reply) => {
+// Spending dashboard: one month of stats (?month=YYYY-MM, default latest) plus
+// history-wide trend + recurring-charge detection. Logic in spending.ts.
+app.get("/api/finance/spending", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
-  const rows = await db
-    .select()
-    .from(events)
-    .where(and(eq(events.source, "plaid"), eq(events.type, "transaction")))
-    .orderBy(desc(events.startTs))
-    .limit(100);
-  const month = new Date().toISOString().slice(0, 7);
-  const detailedById = new Map<number, string | null>();
-  const transactions = rows.map((r) => {
-    const p = (r.payload ?? {}) as {
-      amount?: number;
-      pending?: boolean;
-      category?: string | null;
-      categoryDetailed?: string | null;
-    };
-    detailedById.set(r.id, p.categoryDetailed ?? null);
-    return {
-      id: r.id,
-      date: r.startTs.toISOString().slice(0, 10),
-      name: r.title ?? "(unknown)",
-      amount: p.amount ?? 0,
-      category: p.category ?? null,
-      pending: p.pending ?? false,
-    };
-  });
-  const monthSpend = transactions
-    .filter((t) => {
-      const detailed = detailedById.get(t.id);
-      return (
-        t.date.startsWith(month) &&
-        t.amount > 0 &&
-        !(detailed && NON_SPEND_DETAILED.has(detailed))
-      );
-    })
-    .reduce((sum, t) => sum + t.amount, 0);
-  return {
+  const { month } = req.query as { month?: string };
+  return buildSpendingDashboard(db, {
     configured: plaidCreds() != null,
     linked: Boolean(config.plaidAccessToken),
-    transactions,
     month,
-    monthSpend,
-  };
+  });
 });
 
 // Calendar: events synced read-only from iCloud, ordered by start time.
