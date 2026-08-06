@@ -93,6 +93,30 @@ app.post("/api/todos/:externalId/close", async (req, reply) => {
   return closeTodoistTask(db, config.todoistApiToken, externalId);
 });
 
+// Delete all completed todoist rows from the DB. Completed todos are only a
+// local archive (the task is already closed in Todoist), so this just prunes
+// history. A still-active task deleted here would re-sync on the next pull.
+app.delete("/api/todos/completed", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const deleted = await db
+    .delete(events)
+    .where(
+      and(eq(events.source, "todoist"), eq(events.type, "todo"), sql`payload->>'status' = 'completed'`),
+    )
+    .returning({ id: events.id });
+  return { deleted: deleted.length };
+});
+
+// Delete one todo row by external id (per-row delete on the completed list).
+app.delete("/api/todos/:externalId", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const { externalId } = req.params as { externalId: string };
+  await db
+    .delete(events)
+    .where(and(eq(events.source, "todoist"), eq(events.externalId, externalId)));
+  return { ok: true };
+});
+
 // Finance: upload a Fidelity positions CSV (raw text body) → store holdings.
 app.post("/api/finance/holdings/upload", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });

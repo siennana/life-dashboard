@@ -44,7 +44,7 @@ export function DayLog({ date, showLabel = true }: { date: string; showLabel?: b
           type="button"
           disabled={!dirty || save.isPending}
           onClick={() => save.mutate(log)}
-          className="rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+          className="cursor-pointer rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {save.isPending ? "Saving…" : "Save"}
         </button>

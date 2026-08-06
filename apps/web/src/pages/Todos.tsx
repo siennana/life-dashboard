@@ -1,7 +1,22 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { closeTodo, getTodos, type TodoRow } from "../api";
+import {
+  clearCompletedTodos,
+  closeTodo,
+  deleteTodo,
+  getStatusTimed,
+  getTodos,
+  type TodoRow,
+} from "../api";
 import { compareTodos, CompleteButton, DueDate } from "../lib/todos";
+
+const fmtDateTime = (d: string | Date) =>
+  new Date(d).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 
 // One todo's row content (complete circle + title + due), shared by parent rows
 // and subtask rows.
@@ -110,9 +125,56 @@ function TodoSection({
   );
 }
 
+// Completed todos: a flat archive (most recent first) with per-row delete and a
+// bulk "Clear completed". Deletes only prune the local DB rows.
+function CompletedSection({ completed }: { completed: TodoRow[] }) {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["todos"] });
+  const clear = useMutation({ mutationFn: clearCompletedTodos, onSuccess: invalidate });
+  const del = useMutation({ mutationFn: deleteTodo, onSuccess: invalidate });
+  if (completed.length === 0) return null;
+
+  return (
+    <section className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
+          Completed ({completed.length})
+        </h2>
+        <button
+          type="button"
+          onClick={() => clear.mutate()}
+          disabled={clear.isPending}
+          className="cursor-pointer text-xs text-zinc-500 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {clear.isPending ? "Clearing…" : "Clear completed"}
+        </button>
+      </div>
+      <ul className="mt-3 space-y-2">
+        {completed.map((t) => (
+          <li key={t.externalId} className="flex items-center gap-3 text-sm">
+            <span className="min-w-0 flex-1 truncate text-zinc-400 line-through">{t.title}</span>
+            <span className="shrink-0 text-xs text-zinc-500">{fmtDateTime(t.updatedAt)}</span>
+            <button
+              type="button"
+              aria-label={`Delete ${t.title}`}
+              onClick={() => del.mutate(t.externalId)}
+              disabled={del.isPending}
+              className="shrink-0 cursor-pointer text-zinc-600 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              ✕
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function Todos() {
   const queryClient = useQueryClient();
   const todos = useQuery({ queryKey: ["todos"], queryFn: getTodos });
+  const status = useQuery({ queryKey: ["status"], queryFn: getStatusTimed });
+  const lastSync = status.data?.sources.find((s) => s.source === "todoist")?.finished_at;
   const complete = useMutation({
     mutationFn: closeTodo,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),
@@ -136,6 +198,15 @@ export function Todos() {
     return names.map((name) => ({ name, ...buildTree(byList.get(name)!) }));
   }, [todos.data]);
 
+  // Completed todos, newest completion first (updatedAt = completion time).
+  const completed = useMemo(
+    () =>
+      (todos.data?.todos ?? [])
+        .filter((t) => t.payload?.status === "completed")
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [todos.data],
+  );
+
   function toggle(id: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -147,13 +218,18 @@ export function Todos() {
 
   return (
     <>
-      <p className="mt-1 text-sm text-zinc-400">
-        {new Date().toLocaleDateString(undefined, {
-          weekday: "long",
-          month: "long",
-          day: "numeric",
-        })}
-      </p>
+      <div className="mt-1 flex items-baseline justify-between">
+        <p className="text-sm text-zinc-400">
+          {new Date().toLocaleDateString(undefined, {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+          })}
+        </p>
+        {lastSync && (
+          <p className="text-xs text-zinc-500">Last sync: {fmtDateTime(lastSync)}</p>
+        )}
+      </div>
 
       {todos.isPending && <p className="mt-3 text-zinc-400">Loading…</p>}
       {todos.isError && (
@@ -178,6 +254,8 @@ export function Todos() {
           disabled={complete.isPending}
         />
       ))}
+
+      <CompletedSection completed={completed} />
     </>
   );
 }

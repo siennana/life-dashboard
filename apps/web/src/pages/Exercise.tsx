@@ -195,7 +195,7 @@ function LogForm({
         <button
           type="submit"
           disabled={add.isPending}
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="cursor-pointer rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {add.isPending ? "Saving…" : editing ? "Save changes" : "Add entry"}
         </button>

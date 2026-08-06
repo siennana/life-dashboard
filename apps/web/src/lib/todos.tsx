@@ -50,7 +50,7 @@ export function CompleteButton({
       aria-label={`Complete ${title ?? "todo"}`}
       disabled={disabled}
       onClick={onComplete}
-      className="h-4 w-4 shrink-0 rounded-full border border-zinc-600 hover:border-emerald-400 hover:bg-emerald-400/20 disabled:opacity-50"
+      className="h-4 w-4 shrink-0 cursor-pointer rounded-full border border-zinc-600 hover:border-emerald-400 hover:bg-emerald-400/20 disabled:cursor-not-allowed disabled:opacity-50"
     />
   );
 }

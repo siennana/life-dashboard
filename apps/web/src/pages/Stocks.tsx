@@ -111,7 +111,7 @@ function Uploader() {
           accept=".csv,text/csv"
           onChange={onFile}
           disabled={upload.isPending}
-          className="block w-full text-sm text-zinc-400 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-4 file:py-2 file:text-sm file:text-zinc-100 hover:file:bg-zinc-700 disabled:opacity-50"
+          className="block w-full text-sm text-zinc-400 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-zinc-800 file:px-4 file:py-2 file:text-sm file:text-zinc-100 hover:file:bg-zinc-700 disabled:opacity-50"
         />
       </div>
       {upload.isPending && <p className="mt-3 text-sm text-zinc-400">Importing…</p>}

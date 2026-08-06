@@ -32,11 +32,23 @@ export async function apiFetch<T>(path: string): Promise<T> {
 
 export const getStatus = () => apiFetch<StatusResponse>("/api/status");
 
+export type TimedStatus = StatusResponse & { loadMs: number };
+
+// getStatus, plus the round-trip time in ms (how long the API/DB read took —
+// includes Neon cold-start latency). Shared by SyncStatus and the Todos header.
+export async function getStatusTimed(): Promise<TimedStatus> {
+  const t0 = performance.now();
+  const data = await getStatus();
+  return { ...data, loadMs: Math.round(performance.now() - t0) };
+}
+
 export type TodoRow = {
   id: number;
   externalId: string;
   title: string | null;
   startTs: string;
+  // Set to now() when a todo is marked completed — used as the completion date.
+  updatedAt: string;
   payload: {
     status?: string;
     list?: string | null;
@@ -55,6 +67,23 @@ export async function closeTodo(externalId: string): Promise<void> {
     headers: { Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}` },
   });
   if (!res.ok) throw new Error(await errorMessage(res));
+}
+
+async function apiDelete(path: string): Promise<Response> {
+  const res = await fetch(path, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}` },
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res;
+}
+
+export const deleteTodo = (externalId: string) => apiDelete(`/api/todos/${externalId}`);
+
+export async function clearCompletedTodos(): Promise<number> {
+  const res = await apiDelete("/api/todos/completed");
+  const body = (await res.json()) as { deleted: number };
+  return body.deleted;
 }
 
 export const getPortfolio = () => apiFetch<PortfolioResponse>("/api/finance/portfolio");

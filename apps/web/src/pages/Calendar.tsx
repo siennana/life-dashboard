@@ -492,14 +492,14 @@ export function CalendarPage() {
               type="button"
               disabled={toggle.isPending}
               onClick={() => toggle.mutate({ date: menu.date })}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+              className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-zinc-200 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span
                 className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${
                   periodDays.has(menu.date) ? "bg-red-500" : "border border-zinc-500"
                 }`}
               />
-              {periodDays.has(menu.date) ? "Unmark menstruating" : "Mark menstruating"}
+              menstruating
             </button>
           </div>
         </>
