@@ -21,7 +21,7 @@ Both machines run the same app against **one shared Neon Postgres** (free tier) 
 
 Neon specifics: database is Neon's default **`neondb`** (not `life`), us-east-2, Postgres **18** (local container is 17 — fine, nothing version-specific in play). Free tier scale-to-zero means the first query after idle takes a few seconds to wake the endpoint — a slow first page load after opening the dashboard is normal, not a bug.
 
-**Migration status (as of 2026-08-05):** laptop is on Neon and syncing (schema migrated, Todoist confirmed writing). PC has NOT switched yet — its local docker Postgres still holds the canonical manual data (the 53 imported books + real exercises). Remaining: on the PC run `pnpm db:up` then `pnpm db:copy-to-neon --manual-only`, then point its `DATABASE_URL` at Neon. Delete this paragraph when done. (Neon also has a few junk rows from a laptop-side test copy — 19 todos, a "test" exercise — accepted, todos re-sync over themselves.)
+**Migration complete (as of 2026-08-05):** both machines point at Neon. The PC's manual data (53 imported books + real exercises) was copied over with `--manual-only`; Neon now holds the union of both machines' data (books, exercises, period days, todos, calendar, holdings, Plaid transactions).
 
 - **Use Neon's direct (non-pooled) connection string**, not the `-pooler` one. drizzle-kit migrate needs a real session; PgBouncer in transaction mode breaks it.
 - **SSL needs no code change** — postgres-js parses `sslmode` off the URL itself (`index.js:443`) and `require`/`allow`/`prefer` set `rejectUnauthorized:false` (`connection.js:283`). `.env.example` uses `verify-full`; drop to `require` if a handshake ever fails.
@@ -51,10 +51,16 @@ Sync loop: pull connectors run on API boot, then every 5 min (`runSyncs` in `ind
 ### Todos (source `todoist`)
 Todoist v1 sync + `POST /api/todos/:externalId/close` write-back. Tasks absent from the active set get `payload.status = "completed"` locally.
 
-### Finance (sources `fidelity` + live quotes)
+### Finance — Stocks (sources `fidelity` + live quotes)
 - **Holdings**: `POST /api/finance/holdings/upload` takes a Fidelity positions CSV as raw text body (`text/csv`). Parsed with papaparse in `connectors/fidelity.ts` — loose header matching (Symbol/Quantity/Cost Basis variants), strips `$`/commas, `SPAXX**` asterisks, skips `Pending Activity` + disclaimer rows. Stored as `events` (`type: "holding"`, `externalId` = symbol); re-upload replaces (symbols missing from the upload are deleted = sold).
 - **Live prices**: `GET /api/finance/portfolio` (in `finance.ts`) prices holdings via Finnhub `/quote` (`FINNHUB_API_KEY`, 45s in-memory cache in `connectors/finnhub.ts`). Free tier can't price money-market/mutual funds (SPAXX, FEDDX → 403 → null, shown as "—").
 - **Risk**: beta per symbol from `yahoo-finance2` v4 (`connectors/yahoo.ts`, 12h cache, no key needed) → riskTier per position (thresholds in `finance.ts:betaToTier`) + portfolio rating = value-weighted beta bumped a notch if top position >30% or high-risk value >40%. Deterministic arithmetic, no AI.
+
+### Finance — Bank (source `plaid`)
+`connectors/plaid.ts`: read-only bank transactions via Plaid's incremental `/transactions/sync`; cursor persisted in `sync_runs.cursor` so each run resumes rather than re-pulling history. Transactions normalize into `events` (`type: "transaction"`, `externalId` = `transaction_id`); `removed` entries from Plaid are hard-deleted. One-time setup is a browser handshake: `GET/POST` around `createLinkToken`/`exchangePublicToken` in `index.ts`, driven by the `/plaid-link` page (`PlaidLink.tsx`) — it prints an access token you paste into `PLAID_ACCESS_TOKEN` in `.env` (no vault for this yet, it's a single static token). `Bank.tsx` page + `GET /api/finance/spending` show recent transactions and month-to-date spend; the Home page's `FinanceWidget` surfaces a summary too. `amount > 0` = money out (Plaid convention), inverted for display (outflow red, inflow green).
+
+### Period tracking (source `manual`, type `period`)
+`period.ts`: menstrual cycle tracking, one `events` row per marked day (no ranges — a day is either marked or not), toggled via `POST /api/period/toggle`. No dedicated page; surfaces as a toggle inside the Calendar/Exercise day view (`lib/period.tsx` → `usePeriodDays`) for red-circle rendering on the calendar grid.
 
 ### Exercise (source `manual`, type `exercise`)
 `POST/GET /api/exercises`. Required: `type` (run/gym/yoga/bike/hike/custom) + `date` (YYYY-MM-DD); optional description/totalTime(min)/caloriesBurned. `startTs` = noon UTC of the date (keeps the calendar day TZ-stable). List sorted by workout date desc.
@@ -66,8 +72,11 @@ Todoist v1 sync + `POST /api/todos/:externalId/close` write-back. Tasks absent f
 - **iCloud CalDAV** read-only in `connectors/icloud.ts` (tsdav + node-ical, Basic auth with `ICLOUD_EMAIL` + `ICLOUD_APP_PASSWORD` app-specific password). Never use public ICS links — Sienna's events contain locations. Syncs a −90d/+365d window: RRULE expansion, EXDATE, per-instance overrides; recurring instances get `externalId` = `uid:occurrenceISO`; events gone from the window are pruned. `GET /api/calendar/events` serves them start-ordered.
 - **Calendar page** (`pages/Calendar.tsx`): hand-rolled Monday-start 6×7 grid (no library, on purpose). Fixed 45rem height; week rows are flex items (`basis-0`), expansion works by animating `flex-grow` (expanded week `grow-[25]` = 37.5rem, others compress to 1.5rem). Inside an expanded week, a clicked day widens the same way horizontally (siblings squeeze to `basis-9`). Hover tabs on each row edge toggle week expansion; clicking any day from anywhere expands its week + day. Blue outline marks the current selection (week or day). Chips: violet = iCloud events (`9:30 AM Title`), blue = exercises (`30min gym`); overflow clips — expand the day to see everything.
 
+### Home page
+`pages/Home.tsx`: stacked widgets — `WeatherWidget`, `WeekCalendar`, then `FinanceWidget`/`TodosWidget` side by side, then `SyncStatus` (per-connector `sync_runs` status + a live Neon `select 1` check, source keys relabeled for display — e.g. `calendar` → `CalDAV` — in `SyncStatus.tsx`'s `SOURCE_LABELS`).
+
 ### Web app structure
-`nav.ts` is the single source for sidebar + routes (`implemented: true` = real page, else auto-Placeholder). Implemented: Todos, Calendar, Finance, Exercise, Reading. Placeholders: Home, Career, Wedding. Index redirect stays on `/todos` (Home is intentionally separate). Entry forms on Exercise/Reading are collapsed behind a green "+ Add Entry" button. Layout shell: sidebar fixed, only `<main>` scrolls.
+`nav.ts` is the single source for sidebar + routes (`implemented: true` = real page, else auto-Placeholder). Implemented: Home, Todos, Calendar, Finance (with Stocks + Bank children), Exercise, Reading. Placeholders: Projects, Wedding. Index redirect (`/`) goes to `/home` — the default landing page. Entry forms on Exercise/Reading are collapsed behind a green "+ Add Entry" button. Layout shell: sidebar fixed, only `<main>` scrolls.
 
 ## Gotchas (hard-won, do not rediscover)
 
@@ -77,7 +86,7 @@ Todoist v1 sync + `POST /api/todos/:externalId/close` write-back. Tasks absent f
 - **node-ical types**: `VEvent` includes a `Record<string, unknown>` index signature, so `Omit<VEvent, ...>` degrades all fields to `unknown` (cast instead); text fields are `string | { params, val }` — unwrap before use.
 - **yahoo-finance2 v4** is class-based: `new YahooFinance({...})`; the static default-export methods are deprecated stubs that return `never` / throw.
 - Port 3001 conflicts: a stale API process (hers or a background one) causes `EADDRINUSE` and the *new* process dies while the old one serves stale code — kill the listener on :3001 before debugging "my change isn't taking effect".
-- **`.env` edits need a dev-server restart** — `tsx watch` only restarts on *source* changes and Vite only inlines `VITE_*` values at startup. After changing `DATABASE_URL` (or any key), a still-running `pnpm dev` keeps using the old values; this is how you end up "on Neon" while the API is still writing to local docker.
+- **`.env` edits need a full `pnpm dev` restart, and the two halves drift differently**: Vite auto-restarts on `.env` changes (web gets new values immediately) but `tsx watch` only restarts on *source* changes (API keeps old values). So editing `API_TOKEN` while dev is running = instant 401 on every page, because the web is sending the new token to an API still holding the old one. Same mechanism: changing `DATABASE_URL` leaves the API writing to the old database until restarted — and it cuts the other way too: if `.env` on disk drifts back to the local docker URL (e.g. from pasting an older snapshot while merging in machine-specific keys) while a Neon-connected `tsx watch` is still running, everything *looks* fine until the next source save silently reconnects it to the near-empty local DB. Diff `.env` against `.env.example`/Bitwarden after any manual paste, not just after intentional edits.
 - **`tsx -e` compiles to CJS** — no top-level await in one-liners; wrap in an async IIFE. And `import 'dotenv/config'` resolves `.env` from *cwd*, so under `pnpm --filter @life/api exec` it finds nothing (silently falls back to OS-user Postgres auth) — pass env vars explicitly for ad-hoc scripts.
 
 ## Workflow

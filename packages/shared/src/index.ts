@@ -13,8 +13,18 @@ export const syncStatusSchema = z.object({
 });
 export type SyncStatus = z.infer<typeof syncStatusSchema>;
 
+// Live connectivity check against the Postgres backend (Neon), distinct from
+// sync_runs since the DB connection isn't a connector that runs on a schedule.
+export const dbStatusSchema = z.object({
+  status: z.enum(["ok", "error"]),
+  checkedAt: z.coerce.date(),
+  error: z.string().nullable(),
+});
+export type DbStatus = z.infer<typeof dbStatusSchema>;
+
 export const statusResponseSchema = z.object({
   sources: z.array(syncStatusSchema),
+  database: dbStatusSchema,
 });
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 

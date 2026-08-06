@@ -27,7 +27,7 @@ createRoot(document.getElementById("root")!).render(
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<App />}>
-              <Route index element={<Navigate to="/todos" replace />} />
+              <Route index element={<Navigate to="/home" replace />} />
               <Route path="home" element={<Home />} />
               <Route path="todos" element={<Todos />} />
               <Route path="calendar" element={<CalendarPage />} />

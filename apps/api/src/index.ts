@@ -63,7 +63,7 @@ app.get("/health", async () => {
   }
 });
 
-// Latest sync run per source — powers the sync-status widget.
+// Latest sync run per source, plus a live DB ping — powers the sync-status widget.
 app.get("/api/status", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   const rows = await db.execute(sql`
@@ -71,7 +71,14 @@ app.get("/api/status", async (_req, reply) => {
     from sync_runs
     order by source, started_at desc
   `);
-  return { sources: rows };
+  let database: { status: "ok" | "error"; checkedAt: Date; error: string | null };
+  try {
+    await db.execute(sql`select 1`);
+    database = { status: "ok", checkedAt: new Date(), error: null };
+  } catch (err) {
+    database = { status: "error", checkedAt: new Date(), error: String(err) };
+  }
+  return { sources: rows, database };
 });
 
 app.get("/api/todos", async (_req, reply) => {
