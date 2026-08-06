@@ -11,7 +11,7 @@ import type {
   PeriodToggleInput,
   PeriodToggleResult,
   PortfolioResponse,
-  SpendingResponse,
+  SpendingDashboard,
   StatusResponse,
   UploadResponse,
   WeatherResponse,
@@ -149,7 +149,8 @@ export async function togglePeriodDay(input: PeriodToggleInput): Promise<PeriodT
 
 export const getDayLog = (date: string) => apiFetch<CalendarDayLog>(`/api/calendar/day/${date}`);
 
-export const getSpending = () => apiFetch<SpendingResponse>("/api/finance/spending");
+export const getSpending = (month?: string) =>
+  apiFetch<SpendingDashboard>(`/api/finance/spending${month ? `?month=${month}` : ""}`);
 
 async function apiPost<T>(path: string, body: object): Promise<T> {
   const res = await fetch(path, {

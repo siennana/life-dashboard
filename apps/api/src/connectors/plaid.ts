@@ -29,8 +29,12 @@ async function plaidPost<T>(creds: PlaidCreds, path: string, body: object): Prom
 export function createLinkToken(creds: PlaidCreds) {
   return plaidPost<{ link_token: string }>(creds, "/link/token/create", {
     client_name: "Life Dashboard",
-    user: { client_user_id: "sienna" },
+    // Stable opaque id for Plaid's records - single-user app, so a constant.
+    user: { client_user_id: "life-dashboard-user" },
     products: ["transactions"],
+    // Max history Plaid allows. Only takes effect at link time, so getting more
+    // than the 90-day default on an existing item means re-linking the bank.
+    transactions: { days_requested: 730 },
     country_codes: ["US"],
     language: "en",
   });
@@ -51,8 +55,11 @@ type PlaidTransaction = {
   amount: number; // positive = money out, per Plaid convention
   iso_currency_code?: string | null;
   date: string; // YYYY-MM-DD
+  authorized_date?: string | null; // when swiped, vs `date` = when posted
   name?: string;
   merchant_name?: string | null;
+  logo_url?: string | null;
+  payment_channel?: string | null; // online | in store | other
   pending: boolean;
   personal_finance_category?: { primary?: string; detailed?: string } | null;
 };
@@ -73,6 +80,9 @@ async function upsertTransaction(db: Db, t: PlaidTransaction) {
     accountId: t.account_id,
     category: t.personal_finance_category?.primary ?? null,
     categoryDetailed: t.personal_finance_category?.detailed ?? null,
+    authorizedDate: t.authorized_date ?? null,
+    logoUrl: t.logo_url ?? null,
+    paymentChannel: t.payment_channel ?? null,
   };
   const title = t.merchant_name || t.name || "(unknown)";
   // Noon UTC keeps the transaction on its statement date regardless of TZ.
@@ -93,9 +103,72 @@ async function upsertTransaction(db: Db, t: PlaidTransaction) {
     });
 }
 
+type PlaidAccount = {
+  account_id: string;
+  name: string;
+  official_name?: string | null;
+  mask?: string | null;
+  type: string; // depository | credit | loan | investment | other
+  subtype?: string | null;
+  balances: {
+    current?: number | null;
+    available?: number | null;
+    limit?: number | null;
+    iso_currency_code?: string | null;
+  };
+};
+
+// Account metadata + live balances -> events (type "account"). Refreshed every
+// sync so balances stay current; startTs records the as-of time.
+async function syncAccounts(db: Db, creds: PlaidCreds, accessToken: string) {
+  const { accounts } = await plaidPost<{ accounts: PlaidAccount[] }>(creds, "/accounts/get", {
+    access_token: accessToken,
+  });
+  const now = new Date();
+  for (const a of accounts) {
+    const payload = {
+      officialName: a.official_name ?? null,
+      mask: a.mask ?? null,
+      accountType: a.type,
+      subtype: a.subtype ?? null,
+      balanceCurrent: a.balances.current ?? null,
+      balanceAvailable: a.balances.available ?? null,
+      creditLimit: a.balances.limit ?? null,
+      currency: a.balances.iso_currency_code ?? "USD",
+    };
+    await db
+      .insert(events)
+      .values({
+        source: "plaid",
+        externalId: a.account_id,
+        type: "account",
+        title: a.name,
+        startTs: now,
+        payload,
+      })
+      .onConflictDoUpdate({
+        target: [events.source, events.externalId],
+        set: { title: a.name, startTs: now, payload, updatedAt: now },
+      });
+  }
+  return accounts.length;
+}
+
+// A fresh cursor means a fresh Plaid item (first link OR a re-link, e.g. to
+// raise days_requested). A re-linked item re-sends full history under brand-new
+// transaction_ids, so any rows from the previous item must go or every
+// transaction shows up twice. Safe to wipe: the full history follows.
+async function wipeTransactions(db: Db) {
+  await db.delete(events).where(and(eq(events.source, "plaid"), eq(events.type, "transaction")));
+}
+
+const isCursorError = (err: unknown) => String(err).includes("INVALID_CURSOR");
+
 export async function syncPlaid(db: Db, creds: PlaidCreds, accessToken: string) {
   const run = (await db.insert(syncRuns).values({ source: "plaid" }).returning())[0]!;
   try {
+    const accounts = await syncAccounts(db, creds, accessToken);
+
     // Resume from the last successful run's cursor (undefined = full history).
     const last = await db
       .select()
@@ -105,16 +178,28 @@ export async function syncPlaid(db: Db, creds: PlaidCreds, accessToken: string) 
       .limit(1);
     let cursor = last[0]?.cursor ?? undefined;
 
+    if (!cursor) await wipeTransactions(db);
+
     let added = 0;
     let modified = 0;
     let removed = 0;
     let hasMore = true;
     while (hasMore) {
-      const page = await plaidPost<SyncPage>(creds, "/transactions/sync", {
-        access_token: accessToken,
-        ...(cursor ? { cursor } : {}),
-        count: 500,
-      });
+      let page: SyncPage;
+      try {
+        page = await plaidPost<SyncPage>(creds, "/transactions/sync", {
+          access_token: accessToken,
+          ...(cursor ? { cursor } : {}),
+          count: 500,
+        });
+      } catch (err) {
+        // Stored cursor belongs to a previous item (access token was swapped
+        // after a re-link): start over from scratch for the new item.
+        if (!cursor || !isCursorError(err)) throw err;
+        cursor = undefined;
+        await wipeTransactions(db);
+        continue;
+      }
       for (const t of [...page.added, ...page.modified]) await upsertTransaction(db, t);
       const removedIds = page.removed
         .map((r) => r.transaction_id)
@@ -141,7 +226,7 @@ export async function syncPlaid(db: Db, creds: PlaidCreds, accessToken: string) 
       .update(syncRuns)
       .set({ finishedAt: new Date(), status: "ok", cursor })
       .where(eq(syncRuns.id, run.id));
-    return { ok: true, added, modified, removed };
+    return { ok: true, accounts, added, modified, removed };
   } catch (err) {
     await db
       .update(syncRuns)
