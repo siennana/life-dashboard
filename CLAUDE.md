@@ -6,13 +6,31 @@ Personal life-logging dashboard aggregating external apps (Todoist, Strava, Appl
 
 ```bash
 pnpm dev            # api (tsx watch, :3001) + web (vite, :5173) in parallel
-pnpm db:up          # start postgres via docker compose
+pnpm db:up          # local docker postgres — offline fallback; also required by db:copy-to-neon (it runs psql/pg_dump inside the container)
 pnpm db:generate    # drizzle-kit generate (after schema changes)
-pnpm db:migrate     # apply migrations
+pnpm db:migrate     # apply migrations (against whatever DATABASE_URL points at — normally Neon)
+pnpm db:copy-to-neon # local -> Neon data migration; --manual-only for just books/exercises (see below)
 pnpm typecheck      # all workspaces
 ```
 
 Node 24 via nvm (`.nvmrc`). Non-interactive shells may resolve Node 18 — prefix with `source ~/.nvm/nvm.sh` if needed. Env lives in root `.env` (see `.env.example`); the API and drizzle-kit both load it from repo root.
+
+## Two machines (PC + laptop) — shared Neon Postgres
+
+Both machines run the same app against **one shared Neon Postgres** (free tier) — there is no DB syncing, they just point at the same `DATABASE_URL`. The local docker-compose Postgres stays in the repo as an offline fallback (commented-out URL in `.env`).
+
+Neon specifics: database is Neon's default **`neondb`** (not `life`), us-east-2, Postgres **18** (local container is 17 — fine, nothing version-specific in play). Free tier scale-to-zero means the first query after idle takes a few seconds to wake the endpoint — a slow first page load after opening the dashboard is normal, not a bug.
+
+**Migration status (as of 2026-08-05):** laptop is on Neon and syncing (schema migrated, Todoist confirmed writing). PC has NOT switched yet — its local docker Postgres still holds the canonical manual data (the 53 imported books + real exercises). Remaining: on the PC run `pnpm db:up` then `pnpm db:copy-to-neon --manual-only`, then point its `DATABASE_URL` at Neon. Delete this paragraph when done. (Neon also has a few junk rows from a laptop-side test copy — 19 todos, a "test" exercise — accepted, todos re-sync over themselves.)
+
+- **Use Neon's direct (non-pooled) connection string**, not the `-pooler` one. drizzle-kit migrate needs a real session; PgBouncer in transaction mode breaks it.
+- **SSL needs no code change** — postgres-js parses `sslmode` off the URL itself (`index.js:443`) and `require`/`allow`/`prefer` set `rejectUnauthorized:false` (`connection.js:283`). `.env.example` uses `verify-full`; drop to `require` if a handshake ever fails.
+- **`.env` canonical copy lives in a Bitwarden secure note** — the repo is public, so it is never committed or cloud-synced in plaintext. After changing a var: update the note, then paste it onto the other machine. `.env.example` stays the shared contract; keep it current when adding a var. Known drift: the laptop lacks `FINNHUB_API_KEY` + `ICLOUD_EMAIL`/`ICLOUD_APP_PASSWORD` (present on the PC), so Finance quotes and calendar sync only run from the PC. A connector with missing creds is silently skipped — check which machine synced last (`sync_runs`) before debugging "calendar isn't updating".
+- **Migrating data**: `scripts/db-copy-to-neon.mjs` copies local → Neon. Run migrations against Neon first (`DATABASE_URL="$NEON_DATABASE_URL" pnpm db:migrate`), then run it with `DATABASE_URL` still pointing local and `NEON_DATABASE_URL` set. Neither machine has `pg_dump`/`psql` installed — the script runs both **inside the docker `db` container**, so `pnpm db:up` must be running.
+  - Default mode copies all four tables via `pg_dump --data-only`, and **requires an empty target** (it replays rows verbatim, so anything already synced collides on `events_source_external_id`).
+  - `--manual-only` copies just the `source: "manual"` events — the only data no connector can rebuild. It excludes `id` (target sequence assigns fresh ones) and inserts `on conflict do nothing`, so it is **idempotent and safe against a non-empty Neon**. This is the mode to use once anything has synced.
+- **Only `source: "manual"` data is irreplaceable** (books, exercises). Todoist/calendar/holdings all re-sync from their connectors, so when in doubt the machine with the most manual entries is canonical.
+- Both machines running `pnpm dev` at once is safe — connector upserts are keyed on `(source, external_id)` so they converge — but it does double up `sync_runs` rows.
 
 ## Architecture rules
 
@@ -59,6 +77,8 @@ Todoist v1 sync + `POST /api/todos/:externalId/close` write-back. Tasks absent f
 - **node-ical types**: `VEvent` includes a `Record<string, unknown>` index signature, so `Omit<VEvent, ...>` degrades all fields to `unknown` (cast instead); text fields are `string | { params, val }` — unwrap before use.
 - **yahoo-finance2 v4** is class-based: `new YahooFinance({...})`; the static default-export methods are deprecated stubs that return `never` / throw.
 - Port 3001 conflicts: a stale API process (hers or a background one) causes `EADDRINUSE` and the *new* process dies while the old one serves stale code — kill the listener on :3001 before debugging "my change isn't taking effect".
+- **`.env` edits need a dev-server restart** — `tsx watch` only restarts on *source* changes and Vite only inlines `VITE_*` values at startup. After changing `DATABASE_URL` (or any key), a still-running `pnpm dev` keeps using the old values; this is how you end up "on Neon" while the API is still writing to local docker.
+- **`tsx -e` compiles to CJS** — no top-level await in one-liners; wrap in an async IIFE. And `import 'dotenv/config'` resolves `.env` from *cwd*, so under `pnpm --filter @life/api exec` it finds nothing (silently falls back to OS-user Postgres auth) — pass env vars explicitly for ad-hoc scripts.
 
 ## Workflow
 
