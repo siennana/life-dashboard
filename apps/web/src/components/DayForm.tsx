@@ -1,5 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { closeTodo } from "../api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { closeTodo, getDayTransactions } from "../api";
+import { money } from "../lib/finance";
 import { CompleteButton, useTodosDueOn } from "../lib/todos";
 import { DaySchedule } from "./DaySchedule";
 import { DayLog } from "./DayLog";
@@ -17,7 +18,7 @@ function TodosForDay({ date }: { date: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Todos</span>
-      <div className="mt-1 min-h-16 flex-1 overflow-y-auto rounded-lg border border-dashed border-zinc-700 p-2">
+      <div className="min-h-16 flex-1 overflow-y-auto rounded-lg border border-zinc-700 p-2">
         {due.length === 0 && completed.length === 0 ? (
           <div className="flex h-full min-h-12 items-center justify-center text-[11px] text-zinc-600">
             None due
@@ -52,13 +53,54 @@ function TodosForDay({ date }: { date: string }) {
   );
 }
 
-// The widened-day form. Left column: log + todos. Right column: schedule.
+// Plaid transactions that hit the accounts on this day — read-only, shares the
+// ["day-transactions", date] query. Money out (amount > 0) shows plain; money
+// in (refunds/income, amount < 0) shows green with a leading +.
+function TransactionsForDay({ date }: { date: string }) {
+  const q = useQuery({ queryKey: ["day-transactions", date], queryFn: () => getDayTransactions(date) });
+  const txs = q.data?.transactions ?? [];
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+        Transactions
+      </span>
+      <div className="min-h-16 flex-1 overflow-y-auto rounded-lg border border-zinc-700 p-2">
+        {txs.length === 0 ? (
+          <div className="flex h-full min-h-12 items-center justify-center text-[11px] text-zinc-600">
+            {q.isPending ? "…" : "None"}
+          </div>
+        ) : (
+          <ul className="space-y-1.5">
+            {txs.map((t) => (
+              <li key={t.id} className="flex items-center gap-2 text-xs">
+                <span className="min-w-0 flex-1 truncate text-zinc-200">
+                  {t.name}
+                  {t.pending && <span className="ml-1 text-[10px] text-amber-400/80">pending</span>}
+                </span>
+                <span
+                  className={`shrink-0 tabular-nums ${t.amount < 0 ? "text-emerald-400" : "text-zinc-100"}`}
+                >
+                  {t.amount < 0 ? `+${money(-t.amount)}` : money(t.amount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// The widened-day form. Left column: log + todos + transactions. Right column:
+// schedule.
 export function DayForm({ date }: { date: string }) {
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
-      <div className="flex min-h-0 flex-col gap-3">
+    <div className="grid min-h-0 flex-1 grid-cols-2 gap-2">
+      <div className="flex min-h-0 flex-col gap-2">
         <DayLog date={date} />
         <TodosForDay date={date} />
+        <TransactionsForDay date={date} />
       </div>
       <DaySchedule date={date} />
     </div>

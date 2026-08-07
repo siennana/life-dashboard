@@ -321,13 +321,42 @@ export const spendingDashboardSchema = z.object({
 });
 export type SpendingDashboard = z.infer<typeof spendingDashboardSchema>;
 
-// Calendar day-detail form (expanded day cell): only the log field is
-// implemented; todos/schedule are UI placeholders for now.
+// Net cashflow per day (Plaid), for the per-day figure on the calendar grid.
+// `net` = income − spend (Bank-page definitions); net < 0 means money out on
+// balance. Only days with real movement are included.
+export const cashflowDaySchema = z.object({
+  date: z.string(), // YYYY-MM-DD
+  net: z.number(),
+  spend: z.number(),
+  income: z.number(),
+});
+export type CashflowDay = z.infer<typeof cashflowDaySchema>;
+
+export const cashflowResponseSchema = z.object({
+  days: z.array(cashflowDaySchema),
+});
+export type CashflowResponse = z.infer<typeof cashflowResponseSchema>;
+
+// Plaid transactions on one day, for the calendar day-detail Transactions list.
+export const dayTransactionsResponseSchema = z.object({
+  date: z.string(),
+  transactions: z.array(spendingTransactionSchema),
+});
+export type DayTransactionsResponse = z.infer<typeof dayTransactionsResponseSchema>;
+
+// Calendar day-detail form (expanded day cell): the free-text log auto-saves on
+// blur; todos + transactions read-only alongside it.
 export const calendarDayLogSchema = z.object({
   date: z.string(),
   log: z.string().nullable(),
 });
 export type CalendarDayLog = z.infer<typeof calendarDayLogSchema>;
+
+// Timestamp of the most recent calendar-day edit (the "last saved" stamp).
+export const calendarLastUpdatedSchema = z.object({
+  updatedAt: z.string().nullable(),
+});
+export type CalendarLastUpdated = z.infer<typeof calendarLastUpdatedSchema>;
 
 export const saveDayLogInputSchema = z.object({
   log: z.string().max(20000),

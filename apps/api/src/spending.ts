@@ -1,6 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import { events, type Db } from "@life/db";
-import type { RecurringCharge, SpendingDashboard } from "@life/shared";
+import type {
+  CashflowResponse,
+  DayTransactionsResponse,
+  RecurringCharge,
+  SpendingDashboard,
+} from "@life/shared";
 
 // Internal money movement, not real spending: account-to-account transfers,
 // moves into own investment/savings, and credit-card payments (the purchases
@@ -93,6 +98,77 @@ const isRefund = (t: Tx) =>
   !(t.detailed ?? "").startsWith(NON_INCOME_DETAILED_PREFIX);
 const isIncome = (t: Tx) => t.amount < 0 && t.category === "INCOME";
 
+// One plaid transaction row → Tx. Shared by the spending dashboard and the
+// daily cashflow so both classify amounts identically.
+function toTx(r: typeof events.$inferSelect): Tx {
+  const p = (r.payload ?? {}) as TxPayload;
+  const date = r.startTs.toISOString().slice(0, 10);
+  return {
+    id: r.id,
+    date,
+    month: date.slice(0, 7),
+    name: r.title ?? "(unknown)",
+    amount: p.amount ?? 0,
+    pending: p.pending ?? false,
+    accountId: p.accountId ?? null,
+    category: p.category ?? null,
+    detailed: p.categoryDetailed ?? null,
+  };
+}
+
+async function loadTxs(db: Db): Promise<Tx[]> {
+  const rows = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.source, "plaid"), eq(events.type, "transaction")));
+  return rows.map(toTx);
+}
+
+// Net cashflow per day: income (paychecks) minus spend (net of refunds, with
+// internal transfers / card payments excluded — same rules as the Bank page).
+// `net > 0` = money in on balance, `net < 0` = money out. Days with no real
+// movement are dropped. Powers the per-day figure on the calendar grid.
+export async function buildDailyCashflow(db: Db): Promise<CashflowResponse> {
+  const txs = await loadTxs(db);
+  const byDay = new Map<string, { spend: number; income: number }>();
+  for (const t of txs) {
+    const cur = byDay.get(t.date) ?? { spend: 0, income: 0 };
+    if (isSpend(t) || isRefund(t)) cur.spend += t.amount;
+    else if (isIncome(t)) cur.income += -t.amount;
+    byDay.set(t.date, cur);
+  }
+  const days = [...byDay.entries()]
+    .map(([date, v]) => ({
+      date,
+      spend: round2(v.spend),
+      income: round2(v.income),
+      net: round2(v.income - v.spend),
+    }))
+    .filter((d) => d.spend !== 0 || d.income !== 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return { days };
+}
+
+// Every plaid transaction on one day (newest id first), for the calendar's
+// day-detail Transactions list. Raw rows — no spend/transfer filtering — so the
+// day view shows exactly what hit the accounts.
+export async function buildDayTransactions(db: Db, date: string): Promise<DayTransactionsResponse> {
+  const txs = await loadTxs(db);
+  const transactions = txs
+    .filter((t) => t.date === date)
+    .sort((a, b) => b.id - a.id)
+    .map(({ id, date, name, amount, category, pending, accountId }) => ({
+      id,
+      date,
+      name,
+      amount,
+      category,
+      pending,
+      accountId,
+    }));
+  return { date, transactions };
+}
+
 // Fixed-cadence charges (rent, subscriptions, insurance) detected from the
 // history itself: same merchant, steady amount, steady gap. Plaid has a paid
 // endpoint for this; the DIY version is fine for one person's accounts.
@@ -151,32 +227,13 @@ export async function buildSpendingDashboard(
   db: Db,
   opts: { configured: boolean; linked: boolean; month?: string },
 ): Promise<SpendingDashboard> {
-  const [txRows, accountRows] = await Promise.all([
-    db
-      .select()
-      .from(events)
-      .where(and(eq(events.source, "plaid"), eq(events.type, "transaction"))),
+  const [txs, accountRows] = await Promise.all([
+    loadTxs(db),
     db
       .select()
       .from(events)
       .where(and(eq(events.source, "plaid"), eq(events.type, "account"))),
   ]);
-
-  const txs: Tx[] = txRows.map((r) => {
-    const p = (r.payload ?? {}) as TxPayload;
-    const date = r.startTs.toISOString().slice(0, 10);
-    return {
-      id: r.id,
-      date,
-      month: date.slice(0, 7),
-      name: r.title ?? "(unknown)",
-      amount: p.amount ?? 0,
-      pending: p.pending ?? false,
-      accountId: p.accountId ?? null,
-      category: p.category ?? null,
-      detailed: p.categoryDetailed ?? null,
-    };
-  });
 
   const today = new Date().toISOString().slice(0, 10);
   const currentMonth = today.slice(0, 7);

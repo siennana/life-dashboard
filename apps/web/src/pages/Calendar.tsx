@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getWeather, togglePeriodDay } from "../api";
+import { getCalendarLastUpdated, getCashflow, getWeather, togglePeriodDay } from "../api";
+import type { CashflowDay } from "@life/shared";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
 import { weatherEmoji } from "../lib/weather";
 import { usePeriodDays } from "../lib/period";
@@ -60,7 +61,31 @@ function dayNumClass(opts: { isPeriod: boolean; isToday: boolean; inMonth: boole
           : opts.inMonth
             ? "text-zinc-300"
             : "text-zinc-600";
-  return `inline-flex shrink-0 items-center justify-center rounded-full ${size} ${color}`;
+  // Animate width/height/font-size so the circle eases between full and small
+  // as its week row expands/compresses (matches the row's flex-grow easing).
+  return `inline-flex shrink-0 items-center justify-center rounded-full transition-all duration-300 ${size} ${color}`;
+}
+
+// Compact net-cashflow chip: "-$55" (money out, red) / "+$1,200" (money in,
+// green), rounded to whole dollars to stay narrow in a cell. A covered day with
+// no movement shows a grey "$0". `covered` is false outside the Plaid history
+// window (before the first transaction, or in the future) — those render
+// nothing rather than a misleading $0.
+function CashflowBadge({ day, covered }: { day: CashflowDay | undefined; covered: boolean }) {
+  if (!covered) return null;
+  const net = day?.net ?? 0;
+  const label = net === 0 ? "$0" : `${net < 0 ? "-" : "+"}$${Math.abs(Math.round(net)).toLocaleString()}`;
+  const color = net < 0 ? "text-red-400" : net > 0 ? "text-emerald-400" : "text-zinc-500";
+  const parts = [
+    day && day.spend > 0 ? `Spent $${Math.round(day.spend).toLocaleString()}` : null,
+    day && day.income > 0 ? `Income $${Math.round(day.income).toLocaleString()}` : null,
+  ].filter(Boolean);
+  const title = parts.length > 0 ? parts.join(" · ") : "No transactions";
+  return (
+    <span title={title} className={`shrink-0 text-[11px] tabular-nums ${color}`}>
+      {label}
+    </span>
+  );
 }
 
 export function CalendarPage() {
@@ -112,6 +137,11 @@ export function CalendarPage() {
 
   const { byDay, eventsByDay, exercises } = useDayData();
   const weather = useQuery({ queryKey: ["weather"], queryFn: getWeather });
+  const cashflow = useQuery({ queryKey: ["cashflow"], queryFn: getCashflow });
+  const lastUpdated = useQuery({
+    queryKey: ["calendar-last-updated"],
+    queryFn: getCalendarLastUpdated,
+  });
   const { periodDays } = usePeriodDays();
 
   // Right-click context menu for toggling a day as menstruating.
@@ -161,6 +191,19 @@ export function CalendarPage() {
     () => weeks.findIndex((week) => week.some((c) => dateKey(c.year, c.month, c.day) === todayKey)),
     [weeks, todayKey],
   );
+
+  // Net cashflow per day (income − spend). Shown on any day with movement,
+  // regardless of month — unlike weather, which is a current-week forecast.
+  const cashflowByDay = useMemo(() => {
+    const map = new Map<string, CashflowDay>();
+    for (const d of cashflow.data?.days ?? []) map.set(d.date, d);
+    return map;
+  }, [cashflow.data]);
+  // A day is "covered" (eligible for a $0) only from the first transaction
+  // through today — days are returned oldest-first, so [0] is the earliest.
+  const firstCashDate = cashflow.data?.days[0]?.date ?? null;
+  const isCashCovered = (key: string) =>
+    firstCashDate != null && key >= firstCashDate && key <= todayKey;
 
   // A window of years around now; widens automatically if data falls outside it.
   const years = useMemo(() => {
@@ -226,6 +269,17 @@ export function CalendarPage() {
             </option>
           ))}
         </select>
+        {lastUpdated.data?.updatedAt && (
+          <span className="ml-auto text-xs text-zinc-500">
+            Last saved{" "}
+            {new Date(lastUpdated.data.updatedAt).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            })}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -233,7 +287,7 @@ export function CalendarPage() {
             setMonth(now.getMonth());
             collapseAll();
           }}
-          className="ml-auto rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700"
+          className={`${lastUpdated.data?.updatedAt ? "" : "ml-auto"} rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700`}
         >
           Today
         </button>
@@ -260,8 +314,8 @@ export function CalendarPage() {
           </div>
           {/* Fixed-height stack: expanding a row redistributes space via
               flex-grow (1 -> 25), so the calendar's overall height never
-              changes: expanded = 37.5rem, compressed rows = 1.5rem (one LH). */}
-          <div className="flex h-[45rem] flex-col">
+              changes: expanded = 45rem, compressed rows = 1.8rem (one LH). */}
+          <div className="flex h-[54rem] flex-col">
           {weeks.map((week, wi) => {
             const isExpanded = expandedWeek === wi;
             const isCompressed = expandedWeek !== null && !isExpanded;
@@ -317,12 +371,15 @@ export function CalendarPage() {
                               >
                                 {cell.day}
                               </button>
-                              {wx && (
-                                <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-zinc-400">
-                                  <span className="leading-none">{weatherEmoji(wx.code)}</span>
-                                  <span className="tabular-nums">{wx.tempMax}°</span>
-                                </span>
-                              )}
+                              <span className="flex min-w-0 items-center gap-1">
+                                {wx && (
+                                  <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-zinc-400">
+                                    <span className="leading-none">{weatherEmoji(wx.code)}</span>
+                                    <span className="tabular-nums">{wx.tempMax}°</span>
+                                  </span>
+                                )}
+                                <CashflowBadge day={cashflowByDay.get(key)} covered={isCashCovered(key)} />
+                              </span>
                             </div>
                           );
                         })}
@@ -357,7 +414,9 @@ export function CalendarPage() {
                     const isToday = key === todayKey;
                     const isDayExpanded = isExpanded && expandedDay === key;
                     // Siblings of an expanded day squeeze to a fixed width that
-                    // fits just the day number (basis-9 = number + padding).
+                    // fits just the (small) day number (basis-6 = number +
+                    // padding), so the expanded day gets as much width as
+                    // possible.
                     const isDaySqueezed = isExpanded && expandedDay !== null && !isDayExpanded;
                     const wx = wi === currentWeekIndex ? weatherByDay.get(key) : undefined;
                     const isPeriod = periodDays.has(key);
@@ -365,12 +424,22 @@ export function CalendarPage() {
                       isPeriod,
                       isToday,
                       inMonth: cell.inMonth,
-                      small: isCompressed,
+                      // Squeezed siblings use the same small number as the
+                      // compressed week rows.
+                      small: isCompressed || isDaySqueezed,
                     });
-                    const weatherBadge = wx && !isCompressed && !isDaySqueezed && (
+                    const showBadges = !isCompressed && !isDaySqueezed;
+                    const weatherBadge = wx && showBadges && (
                       <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-400">
                         <span className="leading-none">{weatherEmoji(wx.code)}</span>
                         <span className="tabular-nums">{wx.tempMax}°</span>
+                      </span>
+                    );
+                    // Weather (current-week forecast) then cashflow, right-aligned.
+                    const rightBadges = showBadges && (
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        {weatherBadge}
+                        <CashflowBadge day={cashflowByDay.get(key)} covered={isCashCovered(key)} />
                       </span>
                     );
 
@@ -378,9 +447,8 @@ export function CalendarPage() {
                     // textarea), which can't safely live inside a <button> — so
                     // it renders as a div; only the day number toggles collapse.
                     if (isDayExpanded) {
-                      // Calendar events already show in the Schedule pane below
-                      // (DayForm), so only exercise chips are needed up here.
-                      const hasChips = entries.length > 0;
+                      // Events + exercises both show in the Schedule pane below
+                      // (DayForm), so no chips are needed in the expanded header.
                       return (
                         <div
                           key={key}
@@ -394,9 +462,9 @@ export function CalendarPage() {
                             collapseExpandedDay();
                           }}
                           aria-label={key}
-                          // gap-3 (12px) between sections matches the p-3 frame
+                          // gap-2 (8px) between sections matches the p-2 frame
                           // for an even, consistent rhythm on every edge.
-                          className={`flex min-h-0 grow basis-0 flex-col gap-3 overflow-hidden border-r border-zinc-800/60 p-3 text-left outline outline-2 -outline-offset-2 outline-blue-500 last:border-r-0 ${
+                          className={`flex min-h-0 grow basis-0 flex-col gap-2 overflow-hidden border-r border-zinc-800/60 p-2 text-left outline outline-2 -outline-offset-2 outline-blue-500 last:border-r-0 ${
                             cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
                           }`}
                         >
@@ -409,15 +477,8 @@ export function CalendarPage() {
                             >
                               {cell.day}
                             </button>
-                            {weatherBadge}
+                            {rightBadges}
                           </div>
-                          {hasChips && (
-                            // [&>div]:mt-0 drops DayChips' built-in mt-1 so the
-                            // section gap alone controls spacing here.
-                            <div className="shrink-0 [&>div]:mt-0">
-                              <DayChips dayEvents={[]} entries={entries} />
-                            </div>
-                          )}
                           <DayForm date={key} />
                         </div>
                       );
@@ -430,15 +491,15 @@ export function CalendarPage() {
                         onClick={() => openDay(wi, key, isExpanded)}
                         onContextMenu={(e) => openContextMenu(e, key)}
                         aria-label={key}
-                        className={`flex flex-col overflow-hidden border-r border-zinc-800/60 text-left transition-[flex-grow,flex-basis] duration-300 last:border-r-0 hover:bg-zinc-800/40 ${
-                          isDaySqueezed ? "grow-0 basis-9" : "grow basis-0"
-                        } ${isCompressed ? "p-0.5" : "p-1.5"} ${
+                        className={`flex flex-col overflow-hidden border-r border-zinc-800/60 text-left transition-[flex-grow,flex-basis,padding] duration-300 last:border-r-0 hover:bg-zinc-800/40 ${
+                          isDaySqueezed ? "grow-0 basis-6" : "grow basis-0"
+                        } ${isCompressed || isDaySqueezed ? "p-0.5" : "p-1.5"} ${
                           cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
                         }`}
                       >
                         <div className="flex items-center justify-between gap-1">
                           <span className={dayNumberClass}>{cell.day}</span>
-                          {weatherBadge}
+                          {rightBadges}
                         </div>
                         <DayChips dayEvents={dayEvents} entries={entries} />
                       </button>

@@ -4,6 +4,9 @@ import type {
   BooksResponse,
   CalendarDayLog,
   CalendarEventsResponse,
+  CalendarLastUpdated,
+  CashflowResponse,
+  DayTransactionsResponse,
   ExerciseInput,
   ExerciseRow,
   ExercisesResponse,
@@ -188,8 +191,16 @@ export async function togglePeriodDay(input: PeriodToggleInput): Promise<PeriodT
 
 export const getDayLog = (date: string) => apiFetch<CalendarDayLog>(`/api/calendar/day/${date}`);
 
+export const getCalendarLastUpdated = () =>
+  apiFetch<CalendarLastUpdated>("/api/calendar/last-updated");
+
 export const getSpending = (month?: string) =>
   apiFetch<SpendingDashboard>(`/api/finance/spending${month ? `?month=${month}` : ""}`);
+
+export const getCashflow = () => apiFetch<CashflowResponse>("/api/finance/cashflow");
+
+export const getDayTransactions = (date: string) =>
+  apiFetch<DayTransactionsResponse>(`/api/finance/transactions/${date}`);
 
 async function apiPost<T>(path: string, body: object): Promise<T> {
   const res = await fetch(path, {

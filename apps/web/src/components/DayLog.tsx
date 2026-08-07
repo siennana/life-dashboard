@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getDayLog, saveDayLog } from "../api";
 
-// The per-day free-text log with a Save button. Used in the full day form and
-// in the tight week-scan cells. `showLabel` toggles the "Log" heading.
+// The per-day free-text log. No Save button — it autosaves on blur (clicking
+// out of the field). The text is greyed while locked and turns white on focus
+// (`focus:text-zinc-100`) to signal edit mode. `showLabel` toggles the heading.
 export function DayLog({ date, showLabel = true }: { date: string; showLabel?: boolean }) {
   const queryClient = useQueryClient();
   const dayLog = useQuery({ queryKey: ["day-log", date], queryFn: () => getDayLog(date) });
@@ -19,9 +20,16 @@ export function DayLog({ date, showLabel = true }: { date: string; showLabel?: b
     mutationFn: (value: string) => saveDayLog(date, value),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["day-log", date] });
+      // Refresh the page-level "last saved" stamp.
+      queryClient.invalidateQueries({ queryKey: ["calendar-last-updated"] });
       setDirty(false);
     },
   });
+
+  // Autosave when leaving the field, only if the text actually changed.
+  function handleBlur() {
+    if (dirty && !save.isPending) save.mutate(log);
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -34,24 +42,10 @@ export function DayLog({ date, showLabel = true }: { date: string; showLabel?: b
           setLog(e.target.value);
           setDirty(true);
         }}
+        onBlur={handleBlur}
         placeholder="Notes about the day..."
-        className={`min-h-0 flex-1 resize-none rounded-lg border border-zinc-700 bg-zinc-800 p-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none ${
-          showLabel ? "mt-1" : ""
-        }`}
+        className="min-h-0 flex-1 resize-none rounded-lg border border-zinc-700 bg-zinc-800 p-2 text-xs text-zinc-400 placeholder:text-zinc-500 focus:border-zinc-500 focus:text-zinc-100 focus:outline-none"
       />
-      <div className="mt-1 flex items-center gap-2">
-        <button
-          type="button"
-          disabled={!dirty || save.isPending}
-          onClick={() => save.mutate(log)}
-          className="cursor-pointer rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {save.isPending ? "Saving…" : "Save"}
-        </button>
-        {!dirty && !save.isPending && dayLog.isSuccess && (
-          <span className="text-[10px] text-zinc-600">Saved</span>
-        )}
-      </div>
     </div>
   );
 }

@@ -11,8 +11,8 @@ import { createBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
 import { listPeriodDays, togglePeriodDay } from "./period";
-import { getDayLog, saveDayLog } from "./calendarDay";
-import { buildSpendingDashboard } from "./spending";
+import { getDayLog, getLastUpdated, saveDayLog } from "./calendarDay";
+import { buildDailyCashflow, buildDayTransactions, buildSpendingDashboard } from "./spending";
 import {
   createLinkToken,
   exchangePublicToken,
@@ -179,6 +179,20 @@ app.get("/api/finance/spending", async (req, reply) => {
   });
 });
 
+// Net cashflow per day (income − spend), for the per-day figure on the calendar.
+app.get("/api/finance/cashflow", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return buildDailyCashflow(db);
+});
+
+// All plaid transactions on one day, for the calendar day-detail list.
+app.get("/api/finance/transactions/:date", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const { date } = req.params as { date: string };
+  if (!DATE_PARAM.test(date)) return reply.code(400).send({ error: "invalid date - expected YYYY-MM-DD" });
+  return buildDayTransactions(db, date);
+});
+
 // Calendar: events synced read-only from iCloud, ordered by start time.
 app.get("/api/calendar/events", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
@@ -204,6 +218,12 @@ app.get("/api/calendar/events", async (_req, reply) => {
 });
 
 const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
+
+// Most recent calendar-day edit — the "last saved" stamp on the Calendar page.
+app.get("/api/calendar/last-updated", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return getLastUpdated(db);
+});
 
 // Calendar day detail: the free-text log for a day's expanded-cell form.
 app.get("/api/calendar/day/:date", async (req, reply) => {
