@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useState } from "react";
 import { BOOK_STATUSES, type BookInput, type BookRow, type BookStatus } from "@life/shared";
-import { addBook, getBooks, updateBook } from "../api";
+import { addBook, deleteBook, getBooks, updateBook } from "../api";
 import { SlideDown } from "../components/SlideDown";
 import { useInlineEdit } from "../lib/useInlineEdit";
 
@@ -94,6 +94,15 @@ function LogForm({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["books"] });
       clearForm();
+      onDone();
+    },
+  });
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const del = useMutation({
+    mutationFn: () => deleteBook(editing!.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["books"] });
       onDone();
     },
   });
@@ -220,6 +229,41 @@ function LogForm({
           Cancel
         </button>
         {add.isError && <span className="text-sm text-red-400">{(add.error as Error).message}</span>}
+        {editing && (
+          <div className="ml-auto flex items-center gap-2">
+            {del.isError && (
+              <span className="text-xs text-red-400">{(del.error as Error).message}</span>
+            )}
+            {confirmDelete ? (
+              <>
+                <span className="text-xs text-zinc-400">Delete this book?</span>
+                <button
+                  type="button"
+                  onClick={() => del.mutate()}
+                  disabled={del.isPending}
+                  className="cursor-pointer rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {del.isPending ? "Deleting…" : "Confirm"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+                >
+                  Keep
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="cursor-pointer rounded-lg border border-red-900/60 px-4 py-2 text-sm font-medium text-red-400 hover:bg-red-950/40"
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </form>
   );

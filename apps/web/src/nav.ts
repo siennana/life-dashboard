@@ -6,6 +6,8 @@ export type NavItem = {
   label: string;
   implemented?: boolean;
   children?: NavItem[];
+  // Pinned to the bottom of the sidebar (Settings), below the main tree.
+  bottom?: boolean;
 };
 
 export const NAV_ITEMS: NavItem[] = [
@@ -25,6 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: "/reading", label: "Reading", implemented: true },
   { path: "/projects", label: "Projects" },
   { path: "/wedding", label: "Wedding" },
+  { path: "/settings", label: "Settings", implemented: true, bottom: true },
 ];
 
 // The tree flattened (parents then children) — for route generation.

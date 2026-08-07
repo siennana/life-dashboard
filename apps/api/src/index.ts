@@ -6,8 +6,8 @@ import { config } from "./config";
 import { closeTodoistTask, syncTodoist } from "./connectors/todoist";
 import { importFidelityCsv } from "./connectors/fidelity";
 import { buildPortfolio } from "./finance";
-import { createExercise, listExercises, updateExercise } from "./exercise";
-import { createBook, listBooks, updateBook } from "./books";
+import { createExercise, deleteExercise, listExercises, updateExercise } from "./exercise";
+import { createBook, deleteBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
 import { listPeriodDays, togglePeriodDay } from "./period";
@@ -19,12 +19,14 @@ import {
   syncPlaid,
   type PlaidCreds,
 } from "./connectors/plaid";
+import { getUiSettings, saveUiSettings } from "./settings";
 import {
   bookInputSchema,
   exerciseInputSchema,
   periodToggleInputSchema,
   plaidExchangeInputSchema,
   saveDayLogInputSchema,
+  uiSettingsSchema,
 } from "@life/shared";
 
 const app = Fastify({ logger: true });
@@ -141,6 +143,18 @@ app.get("/api/finance/portfolio", async (_req, reply) => {
 
 // Weather: live 7-day forecast from Open-Meteo for the configured location.
 app.get("/api/weather", async () => getWeather(config));
+
+// UI settings (Settings page): font + theme, one jsonb row in `settings`.
+app.get("/api/settings/ui", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return getUiSettings(db);
+});
+
+app.put("/api/settings/ui", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const value = uiSettingsSchema.parse(req.body);
+  return saveUiSettings(db, value);
+});
 
 // Plaid credentials from .env, or null until both keys are set.
 function plaidCreds(): PlaidCreds | null {
@@ -276,6 +290,15 @@ app.put("/api/exercises/:id", async (req, reply) => {
   return row;
 });
 
+app.delete("/api/exercises/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid exercise id" });
+  const deleted = await deleteExercise(db, id);
+  if (!deleted) return reply.code(404).send({ error: "exercise not found" });
+  return { deleted: true };
+});
+
 // Reading: manually log a book / list all logged books.
 app.post("/api/books", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
@@ -296,6 +319,15 @@ app.put("/api/books/:id", async (req, reply) => {
   const row = await updateBook(db, id, input);
   if (!row) return reply.code(404).send({ error: "book not found" });
   return row;
+});
+
+app.delete("/api/books/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid book id" });
+  const deleted = await deleteBook(db, id);
+  if (!deleted) return reply.code(404).send({ error: "book not found" });
+  return { deleted: true };
 });
 
 // The connectors that can be synced on demand, keyed by their sync_runs source.

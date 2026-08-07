@@ -84,6 +84,16 @@ export async function updateExercise(
   return rows[0] ? toRow(rows[0]) : null;
 }
 
+// Delete a manual exercise row. Returns false when the id isn't a manual
+// exercise (so the route can 404 rather than silently succeed).
+export async function deleteExercise(db: Db, id: number): Promise<boolean> {
+  const deleted = await db
+    .delete(events)
+    .where(and(eq(events.id, id), eq(events.source, "manual"), eq(events.type, "exercise")))
+    .returning({ id: events.id });
+  return deleted.length > 0;
+}
+
 export async function listExercises(db: Db): Promise<ExerciseRow[]> {
   const rows = await db
     .select()

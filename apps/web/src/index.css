@@ -1,1 +1,82 @@
 @import "tailwindcss";
+
+@theme {
+  /* Global density knob: every spacing utility (p-*, m-*, gap-*, space-*, and
+     numeric w-/h-) computes from this base. Tailwind's default is 0.25rem;
+     0.225rem (the app default, = "compact") tightens all padding/margins ~10%
+     app-wide without touching any component. Font sizes are unaffected. The
+     Settings > Style density option overrides it via data-density below. */
+  --spacing: 0.225rem;
+  /* Leading: Tailwind pairs each text size with a line-height ratio (defaults
+     xs 1.33 / sm 1.43 / base 1.5) — that per-line air, not --spacing, is what
+     makes list rows feel tall. These are first-paint defaults; the Settings >
+     Style density sliders override all four vars via inline style on <html>
+     (applyUiSettings in lib/settings.tsx). */
+  --text-xs--line-height: 1.25;
+  --text-sm--line-height: 1.25;
+  --text-base--line-height: 1.35;
+}
+
+/* --- Font (Settings > Style) -----------------------------------------------
+   The saved font sets data-font on <html>; each value maps to a stack here.
+   Inter / JetBrains Mono are bundled via @fontsource (imported in main.tsx),
+   so no CDN or network is involved. */
+:root {
+  --app-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+:root[data-font="inter"] {
+  --app-font: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+}
+:root[data-font="jetbrains-mono"] {
+  --app-font: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", monospace;
+}
+:root[data-font="consolas"] {
+  /* VS Code's default editor/terminal font per platform: Consolas on Windows,
+     Menlo on macOS. System fonts — nothing to bundle. */
+  --app-font: Consolas, Menlo, "Cascadia Mono", ui-monospace, monospace;
+}
+:root[data-font="georgia"] {
+  --app-font: Georgia, "Times New Roman", ui-serif, serif;
+}
+body {
+  font-family: var(--app-font);
+}
+
+/* --- Theme (Settings > Style) ----------------------------------------------
+   The app's components are written entirely in dark zinc utilities. Tailwind
+   v4 utilities resolve through var(--color-*), so remapping the zinc scale
+   under data-theme="light" inverts the whole app in one place — no component
+   changes. Dark is the default (no override needed). Charts that hard-code
+   hex values (Bank/Stocks SVGs) keep their dark-tuned colors in both themes. */
+:root[data-theme="light"] {
+  --color-zinc-950: #f4f4f5; /* page plane */
+  --color-zinc-900: #ffffff; /* card surface */
+  --color-zinc-800: #e4e4e7; /* raised controls / borders */
+  --color-zinc-700: #d4d4d8;
+  --color-zinc-600: #a1a1aa;
+  --color-zinc-500: #71717a;
+  --color-zinc-400: #52525b;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-200: #27272a;
+  --color-zinc-100: #18181b; /* primary text */
+  --color-zinc-50: #09090b;
+
+  /* Accent TEXT steps: components use the light 100-300 (and 400) steps as
+     text on tinted washes — unreadable on a white surface, so darken them to
+     their 600-900 counterparts. Backgrounds/rings (500-scale washes) and solid
+     button colors (emerald-600 etc.) are left alone. */
+  --color-violet-100: #4c1d95;
+  --color-violet-200: #5b21b6;
+  --color-violet-300: #6d28d9;
+  --color-blue-100: #1e3a8a;
+  --color-blue-200: #1e40af;
+  --color-blue-300: #1d4ed8;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-sky-300: #0369a1;
+  --color-sky-400: #0284c7;
+  --color-amber-300: #b45309;
+  --color-amber-400: #d97706;
+  --color-red-300: #b91c1c;
+  --color-red-400: #dc2626;
+}

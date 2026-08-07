@@ -43,6 +43,16 @@ export const metrics = pgTable(
   (t) => [uniqueIndex("metrics_source_name_date").on(t.source, t.name, t.date)],
 );
 
+// App preferences (font, theme, ...) as a tiny key/value store — one row per
+// settings group, options in jsonb. Deliberately not events/metrics: settings
+// have no timestamp or scalar semantics, so shoehorning them there would abuse
+// the generic schema more than a dedicated 3-column table does.
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // One row per connector run — powers the sync-status widget.
 export const syncRuns = pgTable("sync_runs", {
   id: serial("id").primaryKey(),

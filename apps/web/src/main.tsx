@@ -13,8 +13,12 @@ import { Finance } from "./pages/Finance";
 import { Placeholder } from "./pages/Placeholder";
 import { PlaidLink } from "./pages/PlaidLink";
 import { Reading } from "./pages/Reading";
+import { Settings } from "./pages/Settings";
 import { Stocks } from "./pages/Stocks";
 import { Todos } from "./pages/Todos";
+// Selectable fonts (Settings > Style), bundled locally — no CDN.
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import "./index.css";
 
 // Fail fast instead of retrying 3x before surfacing an auth/config error.
@@ -36,6 +40,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="finance/bank" element={<Bank />} />
               <Route path="exercise" element={<Exercise />} />
               <Route path="reading" element={<Reading />} />
+              <Route path="settings" element={<Settings />} />
               {/* Hidden utility page for one-time Plaid bank linking. */}
               <Route path="plaid-link" element={<PlaidLink />} />
               {ALL_NAV_ITEMS.filter((item) => !item.implemented).map((item) => (

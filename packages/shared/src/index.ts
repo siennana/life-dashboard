@@ -321,6 +321,29 @@ export const spendingDashboardSchema = z.object({
 });
 export type SpendingDashboard = z.infer<typeof spendingDashboardSchema>;
 
+// UI settings (Settings > Style panel), stored as one jsonb row in `settings`
+// under key "ui". Defaults make a missing/stale row safe to parse.
+export const UI_FONTS = ["system", "inter", "jetbrains-mono", "consolas", "georgia"] as const;
+export const uiFontSchema = z.enum(UI_FONTS);
+export type UiFont = z.infer<typeof uiFontSchema>;
+
+export const UI_THEMES = ["dark", "light"] as const;
+export const uiThemeSchema = z.enum(UI_THEMES);
+export type UiTheme = z.infer<typeof uiThemeSchema>;
+
+// Density sliders (continuous, replacing the old discrete enum — an old row's
+// `density` key is stripped on parse and these defaults take over):
+// `spacing` is Tailwind's --spacing base in rem (default 0.25; every padding/
+// margin/gap and numeric w-/h- derives from it), `lineHeight` the leading
+// ratio for xs/sm text (base text uses it +0.1). Terminal-tight ≈ 1.15.
+export const uiSettingsSchema = z.object({
+  font: uiFontSchema.default("system"),
+  theme: uiThemeSchema.default("dark"),
+  spacing: z.number().min(0.18).max(0.3).default(0.225),
+  lineHeight: z.number().min(1).max(1.6).default(1.25),
+});
+export type UiSettings = z.infer<typeof uiSettingsSchema>;
+
 // Net cashflow per day (Plaid), for the per-day figure on the calendar grid.
 // `net` = income − spend (Bank-page definitions); net < 0 means money out on
 // balance. Only days with real movement are included.

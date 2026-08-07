@@ -16,6 +16,7 @@ import type {
   PortfolioResponse,
   SpendingDashboard,
   StatusResponse,
+  UiSettings,
   UploadResponse,
   WeatherResponse,
 } from "@life/shared";
@@ -116,11 +117,30 @@ export async function uploadHoldings(csv: string): Promise<UploadResponse> {
 
 export const getExercises = () => apiFetch<ExercisesResponse>("/api/exercises");
 
+export const deleteExercise = (id: number) => apiDelete(`/api/exercises/${id}`);
+
 export const getBooks = () => apiFetch<BooksResponse>("/api/books");
+
+export const deleteBook = (id: number) => apiDelete(`/api/books/${id}`);
 
 export const getCalendarEvents = () => apiFetch<CalendarEventsResponse>("/api/calendar/events");
 
 export const getWeather = () => apiFetch<WeatherResponse>("/api/weather");
+
+export const getUiSettings = () => apiFetch<UiSettings>("/api/settings/ui");
+
+export async function saveUiSettings(value: UiSettings): Promise<UiSettings> {
+  const res = await fetch("/api/settings/ui", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(value),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<UiSettings>;
+}
 
 export async function addBook(input: BookInput): Promise<BookRow> {
   const res = await fetch("/api/books", {

@@ -83,6 +83,16 @@ export async function updateBook(db: Db, id: number, input: BookInput): Promise<
   return rows[0] ? toRow(rows[0]) : null;
 }
 
+// Delete a manual book row. Returns false when the id isn't a manual book (so
+// the route can 404 rather than silently succeed).
+export async function deleteBook(db: Db, id: number): Promise<boolean> {
+  const deleted = await db
+    .delete(events)
+    .where(and(eq(events.id, id), eq(events.source, "manual"), eq(events.type, "book")))
+    .returning({ id: events.id });
+  return deleted.length > 0;
+}
+
 export async function listBooks(db: Db): Promise<BookRow[]> {
   const rows = await db
     .select()
