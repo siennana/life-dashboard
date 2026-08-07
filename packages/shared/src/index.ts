@@ -52,8 +52,24 @@ export const positionSchema = z.object({
   beta: z.number().nullable(),
   riskTier: riskTierSchema,
   weightPct: z.number().nullable(),
+  sector: z.string().nullable(),
+  dividendYieldPct: z.number().nullable(),
+  fiftyTwoWeekLow: z.number().nullable(),
+  fiftyTwoWeekHigh: z.number().nullable(),
+  // Where the live price sits inside the 52-week range, 0 (at the low) to 100.
+  fiftyTwoWeekPct: z.number().nullable(),
 });
 export type Position = z.infer<typeof positionSchema>;
+
+// Value grouped by Yahoo sector ("Other" = funds/unknown), for the allocation
+// chart. Only priced positions contribute.
+export const sectorSliceSchema = z.object({
+  sector: z.string(),
+  value: z.number(),
+  weightPct: z.number(),
+  positions: z.number(),
+});
+export type SectorSlice = z.infer<typeof sectorSliceSchema>;
 
 // Bottom-of-dashboard portfolio-level risk assessment.
 export const portfolioRiskSchema = z.object({
@@ -75,9 +91,24 @@ export const portfolioResponseSchema = z.object({
     totalGain: z.number().nullable(),
     totalGainPct: z.number().nullable(),
     dayGain: z.number().nullable(),
+    dayGainPct: z.number().nullable(),
   }),
+  sectors: z.array(sectorSliceSchema),
+  // Daily portfolio-value snapshots (metrics rows), oldest first. `capturedAt`
+  // is when the stored (last-write-wins) value was computed; null for
+  // `backfilled` days, which are reconstructed daily closes with no wall time.
+  history: z.array(
+    z.object({
+      date: z.string(),
+      value: z.number(),
+      capturedAt: z.string().nullable(),
+      backfilled: z.boolean(),
+    }),
+  ),
   risk: portfolioRiskSchema,
   pricedAt: z.string().nullable(),
+  // When the holdings themselves were last replaced (= last CSV upload).
+  holdingsAsOf: z.string().nullable(),
   quotesConfigured: z.boolean(),
 });
 export type PortfolioResponse = z.infer<typeof portfolioResponseSchema>;

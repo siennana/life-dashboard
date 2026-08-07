@@ -13,6 +13,13 @@ export function localToday(): string {
 export const dueOf = (t: TodoRow) => t.payload?.due?.date?.slice(0, 10) ?? null;
 export const addedOf = (t: TodoRow) => t.payload?.added_at ?? t.startTs;
 
+// Local calendar day (YYYY-MM-DD) of a timestamp. updatedAt is set to now() on
+// completion, so this maps a completed todo to the day it was checked off.
+const localDayOf = (iso: string) => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 // Dated todos first (earliest due first); undated ones sink to the bottom,
 // ordered among themselves by date added.
 export function compareTodos(a: TodoRow, b: TodoRow): number {
@@ -24,14 +31,19 @@ export function compareTodos(a: TodoRow, b: TodoRow): number {
   return addedOf(a).localeCompare(addedOf(b));
 }
 
-// Open todos due on a specific day (used by the calendar's day-detail form).
-// Shares the ["todos"] query with the Todos page/widget — no extra fetch.
+// A day's todos for the calendar's day-detail form: open todos due that day,
+// plus todos completed that day (by updatedAt). Shares the ["todos"] query with
+// the Todos page/widget — no extra fetch.
 export function useTodosDueOn(date: string) {
   const todos = useQuery({ queryKey: ["todos"], queryFn: getTodos });
-  const due = (todos.data?.todos ?? [])
+  const rows = todos.data?.todos ?? [];
+  const due = rows
     .filter((t) => t.payload?.status !== "completed" && dueOf(t) === date)
     .sort(compareTodos);
-  return { due, todos };
+  const completed = rows
+    .filter((t) => t.payload?.status === "completed" && localDayOf(t.updatedAt) === date)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return { due, completed, todos };
 }
 
 // The complete-todo circle, shared by the Todos page and the Home widget.

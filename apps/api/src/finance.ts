@@ -1,8 +1,9 @@
-import type { PortfolioResponse, PortfolioRisk, Position, RiskTier } from "@life/shared";
-import type { Db } from "@life/db";
+import { and, asc, eq, sql } from "drizzle-orm";
+import type { PortfolioResponse, PortfolioRisk, Position, RiskTier, SectorSlice } from "@life/shared";
+import { events, metrics, type Db } from "@life/db";
 import { getHoldings } from "./connectors/fidelity";
 import { fetchQuotes } from "./connectors/finnhub";
-import { fetchBetas } from "./connectors/yahoo";
+import { fetchSymbolStats } from "./connectors/yahoo";
 
 // Sum the non-null values; null if there's nothing to sum (so the UI can tell
 // "zero" apart from "no data").
@@ -122,11 +123,13 @@ export async function buildPortfolio(
   const quotesConfigured = Boolean(finnhubApiKey);
   const symbols = holdings.map((h) => h.symbol);
 
-  const [quotes, betas] = await Promise.all([
+  const [quotes, stats] = await Promise.all([
     finnhubApiKey && holdings.length > 0
       ? fetchQuotes(symbols, finnhubApiKey)
       : Promise.resolve(new Map()),
-    holdings.length > 0 ? fetchBetas(symbols) : Promise.resolve(new Map()),
+    holdings.length > 0
+      ? fetchSymbolStats(symbols)
+      : Promise.resolve(new Map<string, never>()),
   ]);
 
   const positions: Position[] = holdings.map((h) => {
@@ -142,7 +145,14 @@ export async function buildPortfolio(
       h.quantity != null && price != null && previousClose != null
         ? h.quantity * (price - previousClose)
         : null;
-    const beta = betas.get(h.symbol) ?? null;
+    const s = stats.get(h.symbol) ?? null;
+    const beta = s?.beta ?? null;
+    const low = s?.fiftyTwoWeekLow ?? null;
+    const high = s?.fiftyTwoWeekHigh ?? null;
+    const fiftyTwoWeekPct =
+      price != null && low != null && high != null && high > low
+        ? Math.min(100, Math.max(0, ((price - low) / (high - low)) * 100))
+        : null;
     return {
       symbol: h.symbol,
       description: h.description,
@@ -158,6 +168,11 @@ export async function buildPortfolio(
       beta,
       riskTier: betaToTier(beta),
       weightPct: null, // filled in below once the total is known
+      sector: s?.sector ?? null,
+      dividendYieldPct: s?.dividendYieldPct ?? null,
+      fiftyTwoWeekLow: low,
+      fiftyTwoWeekHigh: high,
+      fiftyTwoWeekPct,
     };
   });
 
@@ -165,6 +180,17 @@ export async function buildPortfolio(
   const costBasis = sum(positions.map((p) => p.costBasis));
   const totalGain = sum(positions.map((p) => p.totalGain));
   const totalGainPct = totalGain != null && costBasis ? (totalGain / costBasis) * 100 : null;
+  const dayGain = sum(positions.map((p) => p.dayGain));
+  // Day % against yesterday's close value of the same positions, so the $ and
+  // % always describe the same subset (positions with a quote).
+  const prevCloseValue = sum(
+    positions.map((p) =>
+      p.dayGain != null && p.quantity != null && p.previousClose != null
+        ? p.quantity * p.previousClose
+        : null,
+    ),
+  );
+  const dayGainPct = dayGain != null && prevCloseValue ? (dayGain / prevCloseValue) * 100 : null;
 
   // Position weights (share of total market value) — used for concentration.
   if (marketValue) {
@@ -173,6 +199,8 @@ export async function buildPortfolio(
     }
   }
 
+  await recordPortfolioValue(db, marketValue, positions.length);
+
   return {
     positions: positions.sort((a, b) => (b.marketValue ?? 0) - (a.marketValue ?? 0)),
     totals: {
@@ -180,10 +208,99 @@ export async function buildPortfolio(
       costBasis,
       totalGain,
       totalGainPct,
-      dayGain: sum(positions.map((p) => p.dayGain)),
+      dayGain,
+      dayGainPct,
     },
+    sectors: sectorBreakdown(positions),
+    history: await loadHistory(db),
     risk: assessRisk(positions),
     pricedAt: quotesConfigured && holdings.length > 0 ? new Date().toISOString() : null,
+    holdingsAsOf: await loadHoldingsAsOf(db),
     quotesConfigured,
   };
+}
+
+// The CSV import stamps startTs = upload time on every holding row, so the
+// newest startTs is when the portfolio was last uploaded.
+async function loadHoldingsAsOf(db: Db): Promise<string | null> {
+  const [row] = await db
+    .select({ ts: sql<Date | null>`max(${events.startTs})` })
+    .from(events)
+    .where(and(eq(events.source, "fidelity"), eq(events.type, "holding")));
+  return row?.ts ? new Date(row.ts).toISOString() : null;
+}
+
+// Priced value grouped by sector; funds/unknown fall into "Other". Sorted by
+// value so the allocation chart reads top-down.
+function sectorBreakdown(positions: Position[]): SectorSlice[] {
+  const priced = positions.filter((p) => p.marketValue != null);
+  const total = sum(priced.map((p) => p.marketValue)) ?? 0;
+  if (total <= 0) return [];
+  const groups = new Map<string, { value: number; positions: number }>();
+  for (const p of priced) {
+    const key = p.sector ?? "Other";
+    const g = groups.get(key) ?? { value: 0, positions: 0 };
+    g.value += p.marketValue as number;
+    g.positions += 1;
+    groups.set(key, g);
+  }
+  return [...groups.entries()]
+    .map(([sector, g]) => ({
+      sector,
+      value: g.value,
+      weightPct: (g.value / total) * 100,
+      positions: g.positions,
+    }))
+    .sort((a, b) => b.value - a.value);
+}
+
+// Daily portfolio-value snapshot: one metrics row per calendar day, last write
+// of the day wins. This series can't be backfilled — record it on every priced
+// build (page loads and the 5-min sync loop). A failed snapshot must never
+// break the portfolio response.
+async function recordPortfolioValue(db: Db, marketValue: number | null, holdingCount: number) {
+  if (marketValue == null) return;
+  const today = new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
+  const value = marketValue.toFixed(2);
+  // capturedAt rides in the payload (not createdAt, which onConflict keeps at
+  // the day's first write) so the last-write-wins value carries the wall time
+  // it was actually computed.
+  const payload = { holdings: holdingCount, capturedAt: new Date().toISOString() };
+  try {
+    await db
+      .insert(metrics)
+      .values({
+        source: "fidelity",
+        name: "portfolio_value",
+        value,
+        unit: "usd",
+        date: today,
+        payload,
+      })
+      .onConflictDoUpdate({
+        target: [metrics.source, metrics.name, metrics.date],
+        set: { value, payload },
+      });
+  } catch (err) {
+    console.warn(`[finance] portfolio_value snapshot failed: ${String(err)}`);
+  }
+}
+
+async function loadHistory(
+  db: Db,
+): Promise<{ date: string; value: number; capturedAt: string | null; backfilled: boolean }[]> {
+  const rows = await db
+    .select({ date: metrics.date, value: metrics.value, payload: metrics.payload })
+    .from(metrics)
+    .where(and(eq(metrics.source, "fidelity"), eq(metrics.name, "portfolio_value")))
+    .orderBy(asc(metrics.date));
+  return rows.map((r) => {
+    const p = (r.payload ?? {}) as { capturedAt?: string; backfilled?: boolean };
+    return {
+      date: r.date,
+      value: Number(r.value),
+      capturedAt: p.capturedAt ?? null,
+      backfilled: p.backfilled === true,
+    };
+  });
 }

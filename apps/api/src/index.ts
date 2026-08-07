@@ -386,6 +386,16 @@ async function runSyncs() {
         app.log.error({ err }, "plaid sync failed");
       }
     }
+    // Daily portfolio-value snapshot: buildPortfolio upserts today's metrics
+    // row as a side effect, so the series accumulates even on days the Stocks
+    // page is never opened. Quotes come from cache when the page was just up.
+    if (config.finnhubApiKey) {
+      try {
+        await buildPortfolio(activeDb, config.finnhubApiKey);
+      } catch (err) {
+        app.log.error({ err }, "portfolio snapshot failed");
+      }
+    }
   } finally {
     syncing = false;
   }

@@ -15,11 +15,7 @@
 * plan ahead - map out future exercises
 
 #### Finance / Stocks
-* unrealized P&L per position + total (cost basis vs live price - data already on hand)
-* day change contribution (Finnhub quote d/dp weighted by position size)
-* allocation % per position + sector breakdown (yahoo quoteSummary.assetProfile, cache like beta)
-* dividend yield + 52-week range position (same yahoo call)
-* daily portfolio_value row in `metrics` (starts the time series for trend/drawdown/vs-SPY charts - can't backfill, start early)
+* future: drawdown / vs-SPY charts once the portfolio_value series (recording since 2026-08-07) has enough history
 
 #### Projects
 * track projects

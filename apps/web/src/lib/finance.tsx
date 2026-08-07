@@ -30,7 +30,11 @@ export function Totals({
         value={`${money(totals.totalGain)} (${pct(totals.totalGainPct)})`}
         tone={gainColor(totals.totalGain)}
       />
-      <Stat label="Today" value={money(totals.dayGain)} tone={gainColor(totals.dayGain)} />
+      <Stat
+        label="Today"
+        value={`${money(totals.dayGain)}${totals.dayGainPct != null ? ` (${pct(totals.dayGainPct)})` : ""}`}
+        tone={gainColor(totals.dayGain)}
+      />
     </div>
   );
 }

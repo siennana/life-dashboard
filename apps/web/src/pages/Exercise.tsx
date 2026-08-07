@@ -215,18 +215,39 @@ function LogForm({
   );
 }
 
-type Period = "day" | "month" | "year";
-const PERIODS: Period[] = ["day", "month", "year"];
+type Period = "week" | "month" | "year";
+const PERIODS: Period[] = ["week", "month", "year"];
 
-// Totals over the current day / month / year, computed from the already-loaded
+// Monday-start week (matching the calendar) containing `dateStr`, as inclusive
+// YYYY-MM-DD bounds. Uses string compare on r.date, so no TZ math beyond this.
+function weekBounds(dateStr: string): { start: string; end: string } {
+  const d = new Date(`${dateStr}T12:00:00`);
+  const mondayOffset = (d.getDay() + 6) % 7; // shift JS Sun=0 so Mon=0
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - mondayOffset);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const fmt = (x: Date) =>
+    `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+  return { start: fmt(monday), end: fmt(sunday) };
+}
+
+// Totals over the current week / month / year, computed from the already-loaded
 // exercises (no extra fetch). Miles sums distance across all workout types.
 function ExerciseStats({ rows }: { rows: ExerciseRow[] }) {
   const [period, setPeriod] = useState<Period>("month");
   const localToday = today();
 
   const stats = useMemo(() => {
-    const prefix = period === "day" ? localToday : period === "month" ? localToday.slice(0, 7) : localToday.slice(0, 4);
-    const inPeriod = rows.filter((r) => r.date.startsWith(prefix));
+    const inPeriod =
+      period === "week"
+        ? (() => {
+            const { start, end } = weekBounds(localToday);
+            return rows.filter((r) => r.date >= start && r.date <= end);
+          })()
+        : rows.filter((r) =>
+            r.date.startsWith(period === "month" ? localToday.slice(0, 7) : localToday.slice(0, 4)),
+          );
     return {
       daysLogged: new Set(inPeriod.map((r) => r.date)).size,
       miles: inPeriod.reduce((sum, r) => sum + (r.distanceMiles ?? 0), 0),
@@ -235,8 +256,12 @@ function ExerciseStats({ rows }: { rows: ExerciseRow[] }) {
   }, [rows, period, localToday]);
 
   const periodLabel =
-    period === "day"
-      ? prettyDate(localToday)
+    period === "week"
+      ? (() => {
+          const { start, end } = weekBounds(localToday);
+          const opts = { month: "short", day: "numeric" } as const;
+          return `${new Date(`${start}T12:00:00`).toLocaleDateString(undefined, opts)} – ${new Date(`${end}T12:00:00`).toLocaleDateString(undefined, opts)}`;
+        })()
       : period === "month"
         ? new Date(`${localToday}T12:00:00`).toLocaleDateString(undefined, {
             month: "long",
