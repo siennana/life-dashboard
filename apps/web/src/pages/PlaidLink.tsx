@@ -26,15 +26,22 @@ function loadPlaidScript(): Promise<void> {
   });
 }
 
-// One-time setup page (not in the nav — visit /plaid-link directly, or via the
-// Stocks NM tab's CTA): runs the Plaid Link flow, then shows the permanent
-// access token to paste into .env. Two modes: the default links the bank
-// (transactions → PLAID_ACCESS_TOKEN); ?mode=investments links Northwestern
-// Mutual (holdings → PLAID_NM_ACCESS_TOKEN).
+// One-time setup page (not in the nav — visit /plaid-link directly, or via
+// the Stocks page CTAs): runs the Plaid Link flow, then shows the permanent
+// access token to paste into .env. The default links the bank (transactions →
+// PLAID_US_BANK_ACCESS_TOKEN); ?mode=investments links a brokerage — NM by default
+// (PLAID_NM_ACCESS_TOKEN), or &account=individual for Fidelity
+// (PLAID_FIDELITY_ACCESS_TOKEN).
 export function PlaidLink() {
   const [params] = useSearchParams();
   const investments = params.get("mode") === "investments";
-  const envVar = investments ? "PLAID_NM_ACCESS_TOKEN" : "PLAID_ACCESS_TOKEN";
+  const individual = investments && params.get("account") === "individual";
+  const envVar = individual
+    ? "PLAID_FIDELITY_ACCESS_TOKEN"
+    : investments
+      ? "PLAID_NM_ACCESS_TOKEN"
+      : "PLAID_US_BANK_ACCESS_TOKEN";
+  const target = individual ? "Fidelity" : investments ? "Northwestern Mutual" : "a bank";
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -71,9 +78,7 @@ export function PlaidLink() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold">
-        {investments ? "Connect Northwestern Mutual" : "Connect a bank"}
-      </h1>
+      <h1 className="text-2xl font-semibold">Connect {target}</h1>
       <p className="mt-1 text-sm text-zinc-400">
         One-time Plaid setup. Requires <code>PLAID_CLIENT_ID</code> and <code>PLAID_SECRET</code> in{" "}
         <code>.env</code> first.
@@ -88,7 +93,7 @@ export function PlaidLink() {
               onClick={connect}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
             >
-              {busy ? "Working…" : investments ? "Connect NM via Plaid" : "Connect bank via Plaid"}
+              {busy ? "Working…" : `Connect ${individual ? "Fidelity" : investments ? "NM" : "bank"} via Plaid`}
             </button>
             {status && <p className="mt-3 text-sm text-zinc-400">{status}</p>}
           </>

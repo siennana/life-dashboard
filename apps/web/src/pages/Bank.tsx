@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { SpendingDashboard } from "@life/shared";
 import { getSpending } from "../api";
 import { quietBtnClass } from "../lib/controls";
-import { money } from "../lib/finance";
+import { money, PlaidLinkStatus } from "../lib/finance";
 
 // Spending dashboard (Plaid). Chart color system: spend is one measure, so
 // every chart uses a single accent (slot-1 blue #3987e5, validated ≥3:1 on the
@@ -314,7 +314,11 @@ export function Bank() {
   if (d.transactions.length === 0 && d.months.length === 0) {
     return (
       <>
-        <h1 className="text-2xl font-semibold">Bank</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold">Bank</h1>
+          {/* only once the client keys exist — /plaid-link needs them */}
+          {d.configured && <PlaidLinkStatus linked={d.linked} href="/plaid-link" />}
+        </div>
         <p className="mt-3 text-sm text-zinc-400">
           {!d.configured
             ? "No bank connected — set PLAID_CLIENT_ID / PLAID_SECRET in .env, then visit /plaid-link."
@@ -336,7 +340,10 @@ export function Bank() {
   return (
     <div className="flex flex-col gap-3" style={{ opacity: spending.isFetching ? 0.6 : 1, transition: "opacity 150ms" }}>
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Bank</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold">Bank</h1>
+          <PlaidLinkStatus linked={d.linked} href="/plaid-link" />
+        </div>
         {/* month switcher - the filter row; scopes everything below */}
         <div className="flex items-center gap-1">
           <button

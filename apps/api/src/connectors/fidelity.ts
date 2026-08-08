@@ -11,6 +11,9 @@ type Holding = {
   description: string | null;
   quantity: number | null;
   costBasis: number | null;
+  // "Current Value" column — needed for the core money-market position
+  // (SPAXX), where Fidelity leaves Quantity blank and only reports dollars.
+  currentValue: number | null;
 };
 
 // "$1,234.56" / "n/a" / "--" / "" → number | null
@@ -59,16 +62,21 @@ export function parseHoldings(csv: string): { holdings: Holding[]; skipped: numb
       costBasis: parseMoney(
         pick(row, ["costbasistotal", "costbasis", "totalcostbasis"]),
       ),
+      currentValue: parseMoney(pick(row, ["currentvalue", "marketvalue", "value"])),
     });
   }
 
   return { holdings, skipped };
 }
 
-// Ingest a Fidelity CSV: parse → upsert holdings → drop positions no longer
-// present (sold). Records a sync_run like every other connector.
-export async function importFidelityCsv(db: Db, csv: string) {
-  const run = (await db.insert(syncRuns).values({ source: "fidelity" }).returning())[0]!;
+// Ingest a positions CSV: parse → upsert holdings → drop positions no longer
+// present (sold). Records a sync_run like every other connector. `source`
+// picks which account's holdings this replaces (fidelity/nm/factset — the
+// loose header matching handles most broker exports, not just Fidelity's).
+// On a Plaid-linked account a CSV is only a manual override: the next 5-min
+// investments sync replaces it.
+export async function importFidelityCsv(db: Db, csv: string, source = "fidelity") {
+  const run = (await db.insert(syncRuns).values({ source }).returning())[0]!;
   try {
     const { holdings, skipped } = parseHoldings(csv);
     if (holdings.length === 0) {
@@ -77,11 +85,16 @@ export async function importFidelityCsv(db: Db, csv: string) {
 
     const now = new Date();
     for (const h of holdings) {
-      const payload = { quantity: h.quantity, costBasis: h.costBasis, description: h.description };
+      const payload = {
+        quantity: h.quantity,
+        costBasis: h.costBasis,
+        description: h.description,
+        currentValue: h.currentValue,
+      };
       await db
         .insert(events)
         .values({
-          source: "fidelity",
+          source,
           externalId: h.symbol,
           type: "holding",
           title: h.description ?? h.symbol,
@@ -100,7 +113,7 @@ export async function importFidelityCsv(db: Db, csv: string) {
       .delete(events)
       .where(
         and(
-          eq(events.source, "fidelity"),
+          eq(events.source, source),
           eq(events.type, "holding"),
           notInArray(events.externalId, symbols),
         ),
@@ -120,19 +133,36 @@ export async function importFidelityCsv(db: Db, csv: string) {
   }
 }
 
-// Read stored holdings back out for pricing/display.
-export async function getHoldings(db: Db): Promise<Holding[]> {
+// Read stored holdings back out for pricing/display. Rows come from the CSV
+// import (externalId = symbol, no pricing extras) OR the Plaid investments
+// sync once PLAID_FIDELITY_ACCESS_TOKEN is linked (externalId =
+// security_id, payload carries symbol/institutionPrice/quotable/securityType
+// in the connectors/plaid.ts shape) — read both.
+export async function getHoldings(db: Db): Promise<
+  (Holding & { institutionPrice: number | null; quotable?: boolean; isCash: boolean })[]
+> {
   const rows = await db
     .select()
     .from(events)
     .where(and(eq(events.source, "fidelity"), eq(events.type, "holding")));
   return rows.map((r) => {
-    const p = (r.payload ?? {}) as Partial<Holding>;
+    const p = (r.payload ?? {}) as Partial<Holding> & {
+      symbol?: string;
+      institutionPrice?: number | null;
+      quotable?: boolean;
+      securityType?: string | null;
+    };
     return {
-      symbol: r.externalId,
+      symbol: p.symbol ?? r.externalId,
       description: p.description ?? r.title,
       quantity: p.quantity ?? null,
       costBasis: p.costBasis ?? null,
+      currentValue: p.currentValue ?? null,
+      institutionPrice: p.institutionPrice ?? null,
+      // CSV rows have no flag -> undefined -> the pricing layer defaults to
+      // quotable; Plaid rows carry an explicit boolean.
+      quotable: p.quotable,
+      isCash: p.securityType === "cash",
     };
   });
 }

@@ -5,9 +5,10 @@ import { getPortfolio } from "../api";
 import { Totals } from "../lib/finance";
 
 // One stock account's totals as a 2x2 (market value / cost basis / total gain
-// / today) — Home renders it twice, Individual and NM side by side. Same query
-// keys as the Stocks page tabs (React Query dedupes by key); queryFn is
-// wrapped so react-query's context object isn't passed as the account.
+// / today) — Home's half-width card. (The Finance page uses its denser
+// PortfolioGrid table instead.) Same query keys as the Stocks page tabs
+// (React Query dedupes by key); queryFn is wrapped so react-query's context
+// object isn't passed as the account.
 export function FinanceWidget({
   account = "individual",
   title = "Portfolio",
@@ -49,7 +50,7 @@ export function FinanceWidget({
       )}
       {unlinked && (
         <p className="mt-3 text-sm text-zinc-400">
-          Not linked yet — connect it from the Stocks page's NM tab.
+          Not linked yet — connect it from this account's Stocks tab.
         </p>
       )}
       {empty && !unlinked && (

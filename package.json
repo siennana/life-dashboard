@@ -13,6 +13,7 @@
     "db:generate": "pnpm --filter @life/db generate",
     "db:migrate": "pnpm --filter @life/db migrate",
     "db:copy-to-neon": "node --env-file=.env scripts/db-copy-to-neon.mjs",
-    "backfill:portfolio": "pnpm --filter @life/api exec tsx scripts/backfill-portfolio-value.ts"
+    "backfill:portfolio": "pnpm --filter @life/api exec tsx scripts/backfill-portfolio-value.ts",
+    "backfill:401k": "pnpm --filter @life/api exec tsx scripts/backfill-401k.ts"
   }
 }

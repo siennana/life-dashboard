@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import Fastify from "fastify";
 import { ZodError } from "zod";
-import { createDb, events } from "@life/db";
+import { createDb, events, metrics } from "@life/db";
 import { config } from "./config";
 import { closeTodoistTask, syncTodoist } from "./connectors/todoist";
 import { importFidelityCsv } from "./connectors/fidelity";
@@ -16,10 +16,11 @@ import { buildDailyCashflow, buildDayTransactions, buildSpendingDashboard } from
 import {
   createLinkToken,
   exchangePublicToken,
-  syncNmHoldings,
+  syncInvestmentHoldings,
   syncPlaid,
   type PlaidCreds,
 } from "./connectors/plaid";
+import { syncGithub } from "./connectors/github";
 import { getUiSettings, saveUiSettings } from "./settings";
 import {
   bookInputSchema,
@@ -98,12 +99,18 @@ function processDefs(): ProcessDef[] {
   return [
     { key: "todoist", label: "Todoist", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.todoistApiToken) },
     { key: "calendar", label: "CalDAV", type: "CalDAV", cadence: CADENCE_INTERVAL, configured: Boolean(config.icloudEmail && config.icloudAppPassword) },
-    { key: "plaid", label: "Plaid", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidAccessToken) },
+    { key: "plaid", label: "Plaid", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidUsBankAccessToken) },
     { key: "nm", label: "Northwestern Mutual", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidNmAccessToken) },
+    { key: "github", label: "GitHub", type: "GraphQL API", cadence: CADENCE_INTERVAL, configured: Boolean(config.githubToken) },
     // Both hit only by the market snapshot, which is gated on the Finnhub key.
     { key: "finnhub", label: "Finnhub", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
     { key: "yahoo", label: "Yahoo Finance", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
-    { key: "fidelity", label: "Fidelity", type: "CSV upload", cadence: "manual", configured: true },
+    // Fidelity flips from manual CSV to an automated Plaid pull once its
+    // investments item is linked; that same item also feeds the FactSet 401k.
+    ...(plaidCreds() && config.plaidFidelityAccessToken
+      ? [{ key: "fidelity", label: "Fidelity", type: "REST API", cadence: CADENCE_INTERVAL, configured: true }]
+      : [{ key: "fidelity", label: "Fidelity", type: "CSV upload", cadence: "manual", configured: true }]),
+    { key: "factset", label: "FactSet 401k", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidFidelityAccessToken) },
   ];
 }
 
@@ -202,12 +209,17 @@ app.delete("/api/todos/:externalId", async (req, reply) => {
   return { ok: true };
 });
 
-// Finance: upload a Fidelity positions CSV (raw text body) → store holdings.
+// Finance: upload a positions CSV (raw text body) → store holdings for the
+// given account (?account=individual|nm|factset, default individual). On a
+// Plaid-linked account this is a manual override until the next sync.
 app.post("/api/finance/holdings/upload", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const parsed = stockAccountSchema.safeParse((req.query as { account?: string }).account ?? "individual");
+  if (!parsed.success) return reply.code(400).send({ error: "invalid account - expected individual | nm | factset" });
+  const source = parsed.data === "individual" ? "fidelity" : parsed.data;
   const csv = typeof req.body === "string" ? req.body : "";
   if (!csv.trim()) return reply.code(400).send({ error: "empty upload - expected CSV text" });
-  return importFidelityCsv(db, csv);
+  return importFidelityCsv(db, csv, source);
 });
 
 // Finance: stored holdings priced with live quotes (cached ~45s).
@@ -219,8 +231,76 @@ app.get("/api/finance/portfolio", async (req, reply) => {
   const parsed = stockAccountSchema.safeParse((req.query as { account?: string }).account ?? "individual");
   if (!parsed.success) return reply.code(400).send({ error: "invalid account - expected individual | nm" });
   const account = parsed.data;
-  const linked = account === "nm" ? Boolean(plaidCreds() && config.plaidNmAccessToken) : true;
-  return buildPortfolio(db, config.finnhubApiKey, account, linked);
+  // "linked" = this account's Plaid investments item exists ("factset" rides
+  // the individual item — one Fidelity login covers both). For "nm"/"factset"
+  // it gates the whole dashboard (CTA instead); for "individual" it only
+  // drives the Link Plaid button vs. green check — CSV holdings work either
+  // way, so that dashboard always builds.
+  const linked =
+    account === "nm"
+      ? Boolean(plaidCreds() && config.plaidNmAccessToken)
+      : Boolean(plaidCreds() && config.plaidFidelityAccessToken);
+  return buildPortfolio(db, config.finnhubApiKey, account, account === "individual" ? true : linked).then(
+    (p) => ({ ...p, linked }),
+  );
+});
+
+// GitHub contribution counts (synced into metrics), for the Home heatmap.
+app.get("/api/github/contributions", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const rows = await db
+    .select({ date: metrics.date, value: metrics.value })
+    .from(metrics)
+    .where(and(eq(metrics.source, "github"), eq(metrics.name, "contributions")))
+    .orderBy(asc(metrics.date));
+  return {
+    configured: Boolean(config.githubToken),
+    days: rows.map((r) => ({ date: r.date, count: Number(r.value) })),
+  };
+});
+
+// Repos committed to in the past year, most-committed first (Projects page).
+app.get("/api/github/repos", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const rows = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.source, "github"), eq(events.type, "repo")));
+  const repos = rows
+    .map((r) => {
+      const p = (r.payload ?? {}) as { url?: string; isPrivate?: boolean; commitsPastYear?: number };
+      return {
+        name: r.externalId,
+        url: p.url ?? `https://github.com/${r.externalId}`,
+        isPrivate: p.isPrivate ?? false,
+        commitsPastYear: p.commitsPastYear ?? 0,
+      };
+    })
+    .sort((a, b) => b.commitsPastYear - a.commitsPastYear);
+  return { repos };
+});
+
+// All synced commits, newest first (Projects page day detail groups them
+// client-side by local calendar day).
+app.get("/api/github/commits", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const rows = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.source, "github"), eq(events.type, "commit")))
+    .orderBy(desc(events.startTs));
+  return {
+    commits: rows.map((r) => {
+      const p = (r.payload ?? {}) as { repo?: string; url?: string };
+      return {
+        sha: r.externalId,
+        repo: p.repo ?? "",
+        message: r.title ?? "(no message)",
+        url: p.url ?? "",
+        ts: r.startTs.toISOString(),
+      };
+    }),
+  };
 });
 
 // Weather: live 7-day forecast from Open-Meteo for the configured location.
@@ -275,7 +355,7 @@ app.get("/api/finance/spending", async (req, reply) => {
   const { month } = req.query as { month?: string };
   return buildSpendingDashboard(db, {
     configured: plaidCreds() != null,
-    linked: Boolean(config.plaidAccessToken),
+    linked: Boolean(config.plaidUsBankAccessToken),
     month,
   });
 });
@@ -418,7 +498,7 @@ app.delete("/api/books/:id", async (req, reply) => {
 });
 
 // The connectors that can be synced on demand, keyed by their sync_runs source.
-const SYNCABLE_SOURCES = ["todoist", "calendar", "plaid", "nm"] as const;
+const SYNCABLE_SOURCES = ["todoist", "calendar", "plaid", "nm", "fidelity", "factset", "github"] as const;
 type SyncableSource = (typeof SYNCABLE_SOURCES)[number];
 
 // Run one connector by its source key. Returns the connector's own result, or a
@@ -436,16 +516,28 @@ function runConnector(activeDb: NonNullable<typeof db>, source: SyncableSource):
         : Promise.resolve({ skipped: "not configured" });
     case "plaid": {
       const creds = plaidCreds();
-      return creds && config.plaidAccessToken
-        ? syncPlaid(activeDb, creds, config.plaidAccessToken)
+      return creds && config.plaidUsBankAccessToken
+        ? syncPlaid(activeDb, creds, config.plaidUsBankAccessToken)
         : Promise.resolve({ skipped: "not configured" });
     }
     case "nm": {
       const creds = plaidCreds();
       return creds && config.plaidNmAccessToken
-        ? syncNmHoldings(activeDb, creds, config.plaidNmAccessToken)
+        ? syncInvestmentHoldings(activeDb, creds, config.plaidNmAccessToken, "nm")
         : Promise.resolve({ skipped: "not configured" });
     }
+    // Both keys sync the whole Fidelity item (it feeds fidelity + factset).
+    case "fidelity":
+    case "factset": {
+      const creds = plaidCreds();
+      return creds && config.plaidFidelityAccessToken
+        ? syncInvestmentHoldings(activeDb, creds, config.plaidFidelityAccessToken, "individual")
+        : Promise.resolve({ skipped: "not configured (CSV upload only)" });
+    }
+    case "github":
+      return config.githubToken
+        ? syncGithub(activeDb, config.githubToken)
+        : Promise.resolve({ skipped: "not configured" });
   }
 }
 
@@ -524,21 +616,36 @@ async function runSyncs() {
       }
     }
     const creds = plaidCreds();
-    if (creds && config.plaidAccessToken) {
+    if (creds && config.plaidUsBankAccessToken) {
       try {
-        await syncPlaid(activeDb, creds, config.plaidAccessToken);
+        await syncPlaid(activeDb, creds, config.plaidUsBankAccessToken);
       } catch (err) {
         app.log.error({ err }, "plaid sync failed");
       }
     }
-    // NM holdings before the market snapshot, so the snapshot prices fresh
-    // positions.
+    // Investment holdings before the market snapshot, so the snapshot prices
+    // fresh positions.
     const nmLinked = Boolean(creds && config.plaidNmAccessToken);
+    const individualLinked = Boolean(creds && config.plaidFidelityAccessToken);
     if (creds && config.plaidNmAccessToken) {
       try {
-        await syncNmHoldings(activeDb, creds, config.plaidNmAccessToken);
+        await syncInvestmentHoldings(activeDb, creds, config.plaidNmAccessToken, "nm");
       } catch (err) {
         app.log.error({ err }, "nm holdings sync failed");
+      }
+    }
+    if (creds && config.plaidFidelityAccessToken) {
+      try {
+        await syncInvestmentHoldings(activeDb, creds, config.plaidFidelityAccessToken, "individual");
+      } catch (err) {
+        app.log.error({ err }, "fidelity holdings sync failed");
+      }
+    }
+    if (config.githubToken) {
+      try {
+        await syncGithub(activeDb, config.githubToken);
+      } catch (err) {
+        app.log.error({ err }, "github sync failed");
       }
     }
     // Market data: price each account's portfolio + upsert today's value
@@ -546,7 +653,11 @@ async function runSyncs() {
     // metrics series accumulates even on days the Stocks page is never opened.
     if (config.finnhubApiKey) {
       try {
-        await syncPortfolioSnapshot(activeDb, config.finnhubApiKey, nmLinked);
+        await syncPortfolioSnapshot(activeDb, config.finnhubApiKey, [
+          "individual",
+          ...(nmLinked ? (["nm"] as const) : []),
+          ...(individualLinked ? (["factset"] as const) : []),
+        ]);
       } catch (err) {
         app.log.error({ err }, "market snapshot failed");
       }

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import type { PortfolioResponse, RiskTier, StockAccount } from "@life/shared";
+import { STOCK_ACCOUNTS, type PortfolioResponse, type RiskTier, type StockAccount } from "@life/shared";
 import { getPortfolio, uploadHoldings } from "../api";
 import {
   ACCENT,
@@ -12,6 +12,7 @@ import {
   INK_MUTED,
   money,
   pct,
+  PlaidLinkStatus,
   TipBox,
   Totals,
   type Tip,
@@ -308,14 +309,16 @@ function RiskCard({ risk }: { risk: PortfolioResponse["risk"] }) {
 
 // Just the browse control (no panel) — lives next to the page title. A hidden
 // native file input triggered by a styled button; import feedback drops in as
-// a small note beneath it rather than a whole card.
-function UploadButton() {
+// a small note beneath it rather than a whole card. Uploads replace the
+// active account's holdings; on a Plaid-linked account that only lasts until
+// the next 5-min sync.
+function UploadButton({ account }: { account: StockAccount }) {
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [note, setNote] = useState<string | null>(null);
 
   const upload = useMutation({
-    mutationFn: uploadHoldings,
+    mutationFn: (csv: string) => uploadHoldings(csv, account),
     onSuccess: (res) => {
       setNote(`Imported ${res.imported} holdings${res.skipped ? `, skipped ${res.skipped} rows` : ""}.`);
       queryClient.invalidateQueries({ queryKey: ["portfolio"] });
@@ -438,6 +441,7 @@ function PositionsTable({ positions }: { positions: PortfolioResponse["positions
 const ACCOUNT_TABS: { key: StockAccount; label: string }[] = [
   { key: "individual", label: "Individual" },
   { key: "nm", label: "NM" },
+  { key: "factset", label: "FactSet 401k" },
 ];
 
 function AccountTabs({
@@ -474,35 +478,63 @@ function AccountTabs({
   );
 }
 
-// The NM tab before its Plaid item exists: point at the one-time link flow.
-function NmLinkCta() {
+// Where each account's Plaid link flow lives (FactSet rides the Fidelity
+// item, so its link runs the individual-account flow). Rendered by the shared
+// PlaidLinkStatus (lib/finance) next to Upload CSV on every tab.
+const PLAID_LINK_HREF: Record<StockAccount, string> = {
+  individual: "/plaid-link?mode=investments&account=individual",
+  nm: "/plaid-link?mode=investments",
+  factset: "/plaid-link?mode=investments&account=individual",
+};
+
+// An unlinked Plaid-fed tab: point at the one-time link flow. The FactSet
+// 401k rides the Fidelity item, so its CTA runs the individual-account link.
+const LINK_CTA: Record<"nm" | "factset", { title: string; env: string; href: string; label: string }> = {
+  nm: {
+    title: "Northwestern Mutual",
+    env: "PLAID_NM_ACCESS_TOKEN",
+    href: "/plaid-link?mode=investments",
+    label: "Link NM via Plaid",
+  },
+  factset: {
+    title: "FactSet 401k",
+    env: "PLAID_FIDELITY_ACCESS_TOKEN",
+    href: "/plaid-link?mode=investments&account=individual",
+    label: "Link Fidelity via Plaid",
+  },
+};
+
+function LinkCta({ account }: { account: "nm" | "factset" }) {
+  const cta = LINK_CTA[account];
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
-      <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
-        Northwestern Mutual
-      </h2>
+      <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">{cta.title}</h2>
       <p className="mt-3 text-sm text-zinc-400">
         This account isn't linked yet. Connect it through Plaid to pull holdings into the same
         dashboard — a one-time setup.
+        {account === "factset" && " The 401k comes through the Fidelity login's Plaid item."}
       </p>
       <Link
-        to="/plaid-link?mode=investments"
+        to={cta.href}
         className="mt-4 inline-block rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
       >
-        Link NM via Plaid
+        {cta.label}
       </Link>
       <p className="mt-3 text-xs text-zinc-500">
-        After linking, paste the access token into <code>.env</code> as{" "}
-        <code>PLAID_NM_ACCESS_TOKEN</code> and restart the API — holdings sync on boot, then every 5
-        minutes.
+        After linking, paste the access token into <code>.env</code> as <code>{cta.env}</code> and
+        restart the API — holdings sync on boot, then every 5 minutes.
       </p>
     </section>
   );
 }
 
+const isStockAccount = (v: string | undefined | null): v is StockAccount =>
+  (STOCK_ACCOUNTS as readonly string[]).includes(v ?? "");
+
 // Bare /finance/stocks: land on the last-viewed tab (stamped below).
 export function StocksIndexRedirect() {
-  const last = localStorage.getItem("stocks.account") === "nm" ? "nm" : "individual";
+  const stored = localStorage.getItem("stocks.account");
+  const last = isStockAccount(stored) ? stored : "individual";
   return <Navigate to={`/finance/stocks/${last}`} replace />;
 }
 
@@ -512,7 +544,7 @@ export function Stocks() {
   // just routes.
   const { account: accountParam } = useParams();
   const navigate = useNavigate();
-  const account: StockAccount = accountParam === "nm" ? "nm" : "individual";
+  const account: StockAccount = isStockAccount(accountParam) ? accountParam : "individual";
   // Remember the last-viewed tab for the bare-URL redirect above.
   useEffect(() => {
     localStorage.setItem("stocks.account", account);
@@ -523,9 +555,9 @@ export function Stocks() {
   });
   const positions = portfolio.data?.positions ?? [];
   const history = portfolio.data?.history ?? [];
-  const nmUnlinked = account === "nm" && portfolio.data != null && !portfolio.data.linked;
+  const unlinked = account !== "individual" && portfolio.data != null && !portfolio.data.linked;
 
-  if (accountParam !== "individual" && accountParam !== "nm") {
+  if (!isStockAccount(accountParam)) {
     return <Navigate to="/finance/stocks/individual" replace />;
   }
 
@@ -535,7 +567,10 @@ export function Stocks() {
       <div className="flex items-baseline justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">Stocks</h1>
-          {account === "individual" && <UploadButton />}
+          <UploadButton account={account} />
+          {portfolio.data && (
+            <PlaidLinkStatus linked={portfolio.data.linked} href={PLAID_LINK_HREF[account]} />
+          )}
         </div>
         {(portfolio.data?.holdingsAsOf || portfolio.data?.pricedAt) && (
           <span className="text-xs text-zinc-500">
@@ -564,18 +599,22 @@ export function Stocks() {
           Couldn't load portfolio — {(portfolio.error as Error).message}
         </p>
       )}
-      {nmUnlinked && <NmLinkCta />}
-      {portfolio.isSuccess && !nmUnlinked && positions.length === 0 && (
+      {unlinked && <LinkCta account={account} />}
+      {portfolio.isSuccess && !unlinked && positions.length === 0 && (
         <p className="text-zinc-400">
           {account === "individual"
             ? "No holdings yet — upload a Fidelity CSV above to get started."
-            : "NM is linked but no holdings have synced yet — the first sync runs on API boot, then every 5 minutes."}
+            : "Linked, but no holdings have synced yet — the first sync runs on API boot, then every 5 minutes."}
         </p>
       )}
 
       {positions.length > 0 && portfolio.data && (
         <>
-          <Totals totals={portfolio.data.totals} />
+          <Totals
+            totals={portfolio.data.totals}
+            showCash
+            gridClassName="grid-cols-2 sm:grid-cols-5"
+          />
 
           <Card
             title="Portfolio value"

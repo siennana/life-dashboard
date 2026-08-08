@@ -12,7 +12,7 @@ const HOSTS: Record<string, string> = {
 
 export type PlaidCreds = { clientId: string; secret: string; env: string };
 
-async function plaidPost<T>(creds: PlaidCreds, path: string, body: object): Promise<T> {
+export async function plaidPost<T>(creds: PlaidCreds, path: string, body: object): Promise<T> {
   const res = await fetch(`${HOSTS[creds.env] ?? HOSTS.production}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -156,11 +156,14 @@ async function syncAccounts(db: Db, creds: PlaidCreds, accessToken: string) {
   return accounts.length;
 }
 
-// ---- Northwestern Mutual investments (second Plaid item, source "nm") -------
+// ---- Investment holdings via Plaid (NM + optionally Fidelity) ---------------
 // Holdings only, via /investments/holdings/get (no incremental sync — Plaid
 // returns the full current position list every call, so each run replaces).
-// Rows land in `events` (source "nm", type "holding", externalId =
-// security_id — the stable key; tickers can be null for annuity sub-funds).
+// Rows land in `events` (source "nm" or "fidelity", type "holding",
+// externalId = security_id — the stable key; tickers can be null for annuity
+// sub-funds). For "fidelity" the first sync's prune also deletes the old
+// CSV-upload rows (symbol externalIds) — Plaid becomes the source of truth,
+// though a CSV upload still works as a manual override between syncs.
 
 type PlaidInvestmentHolding = {
   account_id: string;
@@ -210,38 +213,76 @@ function nmSymbol(s: PlaidSecurity | undefined): { symbol: string; quotable: boo
   };
 }
 
-export async function syncNmHoldings(db: Db, creds: PlaidCreds, accessToken: string) {
-  const run = (await db.insert(syncRuns).values({ source: "nm" }).returning())[0]!;
+// One Plaid item can hold several real accounts (the Fidelity login covers
+// the individual brokerage AND the FactSet 401k), and each dashboard account
+// is its own source. `item` picks the routing: "nm" sends everything to
+// source "nm"; "individual" splits by account subtype — 401k accounts feed
+// source "factset", everything else "fidelity". Each source gets its own
+// sync_runs row per run (they share the fate of the one API call).
+export async function syncInvestmentHoldings(
+  db: Db,
+  creds: PlaidCreds,
+  accessToken: string,
+  item: "nm" | "individual",
+) {
+  const sources = item === "nm" ? ["nm"] : ["fidelity", "factset"];
+  const runs = await db
+    .insert(syncRuns)
+    .values(sources.map((source) => ({ source })))
+    .returning();
   try {
-    const { holdings, securities } = await plaidPost<{
+    const { accounts, holdings, securities } = await plaidPost<{
+      accounts: { account_id: string; subtype?: string | null }[];
       holdings: PlaidInvestmentHolding[];
       securities: PlaidSecurity[];
     }>(creds, "/investments/holdings/get", { access_token: accessToken });
     const securityById = new Map(securities.map((s) => [s.security_id, s]));
+    const subtypeByAccount = new Map(accounts.map((a) => [a.account_id, a.subtype ?? null]));
+    const sourceOf = (accountId: string) =>
+      item === "nm"
+        ? "nm"
+        : subtypeByAccount.get(accountId) === "401k"
+          ? "factset"
+          : "fidelity";
 
-    // The same security can sit in several sub-accounts of the item — the
-    // dashboard is per-position, so aggregate by security.
+    // The same security can sit in several sub-accounts of one source — the
+    // dashboard is per-position, so aggregate by (source, security).
     const bySecurity = new Map<string, PlaidInvestmentHolding[]>();
     for (const h of holdings) {
-      const list = bySecurity.get(h.security_id) ?? [];
+      const key = `${sourceOf(h.account_id)} ${h.security_id}`;
+      const list = bySecurity.get(key) ?? [];
       list.push(h);
-      bySecurity.set(h.security_id, list);
+      bySecurity.set(key, list);
     }
 
     const now = new Date();
-    for (const [securityId, rows] of bySecurity) {
+    const storedBySource = new Map<string, string[]>(sources.map((s) => [s, []]));
+    for (const [key, rows] of bySecurity) {
+      const [source, securityId] = key.split(" ") as [string, string];
       const s = securityById.get(securityId);
       const sumOf = (pick: (h: PlaidInvestmentHolding) => number | null | undefined) => {
         const present = rows.map(pick).filter((v): v is number => v != null);
         return present.length ? present.reduce((a, b) => a + b, 0) : null;
       };
       const { symbol, quotable } = nmSymbol(s);
+      const isCash = s?.type === "cash";
+      const quantity = sumOf((h) => h.quantity);
+      // NM emits bookkeeping artifacts: zero-quantity zero-value cash rows
+      // whose cost_basis carries an offsetting ledger amount. A holding with
+      // nothing held and nothing valued is noise - skip it (the prune below
+      // then deletes any previously stored copy).
+      if (Math.abs(quantity ?? 0) < 1e-9 && Math.abs(sumOf((h) => h.institution_value) ?? 0) < 0.005) {
+        continue;
+      }
       const payload: NmHolding & { securityType: string | null; currency: string } = {
         symbol,
         quotable,
         description: s?.name ?? null,
-        quantity: sumOf((h) => h.quantity),
-        costBasis: sumOf((h) => h.cost_basis),
+        quantity,
+        // Cash has no cost-basis semantics - Plaid's ledger figures there
+        // poison the portfolio totals (a -$2,988 cash "cost" once turned into
+        // a phantom +$2,988 total gain and a /~0 gain percentage).
+        costBasis: isCash ? null : sumOf((h) => h.cost_basis),
         institutionPrice: rows[0]?.institution_price ?? s?.close_price ?? null,
         securityType: s?.type ?? null,
         currency: rows[0]?.iso_currency_code ?? "USD",
@@ -249,7 +290,7 @@ export async function syncNmHoldings(db: Db, creds: PlaidCreds, accessToken: str
       await db
         .insert(events)
         .values({
-          source: "nm",
+          source,
           externalId: securityId,
           type: "holding",
           title: payload.description ?? payload.symbol,
@@ -260,17 +301,19 @@ export async function syncNmHoldings(db: Db, creds: PlaidCreds, accessToken: str
           target: [events.source, events.externalId],
           set: { title: payload.description ?? payload.symbol, startTs: now, payload, updatedAt: now },
         });
+      storedBySource.get(source)!.push(securityId);
     }
 
-    // A security missing from this pull was sold — remove it (same replace
-    // semantics as the Fidelity CSV upload).
-    const keep = [...bySecurity.keys()];
-    if (keep.length > 0) {
+    // A security missing from this pull (or skipped as an artifact above) was
+    // sold — remove it per source (same replace semantics as the CSV upload;
+    // for "fidelity" the first Plaid prune also clears the old CSV rows).
+    for (const [source, keep] of storedBySource) {
+      if (keep.length === 0) continue;
       await db
         .delete(events)
         .where(
           and(
-            eq(events.source, "nm"),
+            eq(events.source, source),
             eq(events.type, "holding"),
             notInArray(events.externalId, keep),
           ),
@@ -280,34 +323,43 @@ export async function syncNmHoldings(db: Db, creds: PlaidCreds, accessToken: str
     await db
       .update(syncRuns)
       .set({ finishedAt: new Date(), status: "ok" })
-      .where(eq(syncRuns.id, run.id));
-    return { ok: true, holdings: bySecurity.size };
+      .where(inArray(syncRuns.id, runs.map((r) => r.id)));
+    return {
+      ok: true,
+      holdings: Object.fromEntries([...storedBySource].map(([s, ids]) => [s, ids.length])),
+    };
   } catch (err) {
     await db
       .update(syncRuns)
       .set({ finishedAt: new Date(), status: "error", error: String(err) })
-      .where(eq(syncRuns.id, run.id));
+      .where(inArray(syncRuns.id, runs.map((r) => r.id)));
     throw err;
   }
 }
 
-// Read stored NM holdings back out for pricing/display (finance.ts).
-export async function getNmHoldings(db: Db): Promise<NmHolding[]> {
+// Read stored Plaid-shape holdings back out for pricing/display (finance.ts).
+// Works for any source the investments sync writes ("nm", "factset").
+export async function getInvestmentHoldings(
+  db: Db,
+  source: string,
+): Promise<(NmHolding & { isCash: boolean })[]> {
   const rows = await db
     .select()
     .from(events)
-    .where(and(eq(events.source, "nm"), eq(events.type, "holding")));
+    .where(and(eq(events.source, source), eq(events.type, "holding")));
   return rows.map((r) => {
-    const p = (r.payload ?? {}) as Partial<NmHolding>;
+    const p = (r.payload ?? {}) as Partial<NmHolding> & { securityType?: string | null };
     return {
       symbol: p.symbol ?? r.externalId,
       description: p.description ?? r.title,
       quantity: p.quantity ?? null,
       costBasis: p.costBasis ?? null,
       institutionPrice: p.institutionPrice ?? null,
-      // Strict === true: rows written before this flag existed stay unquoted
-      // (institution-priced) until the next sync rewrites their payload.
-      quotable: p.quotable === true,
+      // Plaid-written rows always carry an explicit boolean; a CSV override
+      // (no flag) has real tickers, so default quotable. The TICKER_RE filter
+      // in finance.ts still keeps junk symbols away from the providers.
+      quotable: p.quotable ?? true,
+      isCash: p.securityType === "cash",
     };
   });
 }

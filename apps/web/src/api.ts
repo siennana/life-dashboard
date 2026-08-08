@@ -1,5 +1,6 @@
 import type {
   BookInput,
+  ContributionsResponse,
   BookRow,
   BooksResponse,
   CalendarDayLog,
@@ -10,6 +11,8 @@ import type {
   ExerciseInput,
   ExerciseRow,
   ExercisesResponse,
+  GithubCommitsResponse,
+  GithubReposResponse,
   PeriodsResponse,
   PeriodToggleInput,
   PeriodToggleResult,
@@ -105,8 +108,11 @@ export async function syncSource(source: string): Promise<void> {
 export const getPortfolio = (account: StockAccount = "individual") =>
   apiFetch<PortfolioResponse>(`/api/finance/portfolio?account=${account}`);
 
-export async function uploadHoldings(csv: string): Promise<UploadResponse> {
-  const res = await fetch("/api/finance/holdings/upload", {
+export async function uploadHoldings(
+  csv: string,
+  account: StockAccount = "individual",
+): Promise<UploadResponse> {
+  const res = await fetch(`/api/finance/holdings/upload?account=${account}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
@@ -117,6 +123,13 @@ export async function uploadHoldings(csv: string): Promise<UploadResponse> {
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json() as Promise<UploadResponse>;
 }
+
+export const getContributions = () =>
+  apiFetch<ContributionsResponse>("/api/github/contributions");
+
+export const getGithubRepos = () => apiFetch<GithubReposResponse>("/api/github/repos");
+
+export const getGithubCommits = () => apiFetch<GithubCommitsResponse>("/api/github/commits");
 
 export const getExercises = () => apiFetch<ExercisesResponse>("/api/exercises");
 

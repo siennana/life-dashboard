@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import type { PortfolioResponse } from "@life/shared";
 import { Stat } from "../components/Stat";
+import { CheckIcon } from "../components/icons";
 
 // Shared finance formatting, the totals tiles, and the portfolio-value line
 // chart — used by the Stocks page, the Finance landing page, and the Home
@@ -19,13 +21,18 @@ export const gainColor = (n: number | null) =>
 export function Totals({
   totals,
   gridClassName = "grid-cols-2 sm:grid-cols-4",
+  showCash = false,
 }: {
   totals: PortfolioResponse["totals"];
   gridClassName?: string;
+  // Adds the Cash tile (uninvested value, included in market value) — the
+  // Stocks page turns it on; the compact Home/Finance widgets stay 4-up.
+  showCash?: boolean;
 }) {
   return (
     <div className={`grid gap-3 ${gridClassName}`}>
       <Stat label="Market value" value={money(totals.marketValue)} />
+      {showCash && <Stat label="Cash" value={money(totals.cashValue)} />}
       <Stat label="Cost basis" value={money(totals.costBasis)} />
       <Stat
         label="Total gain"
@@ -38,6 +45,28 @@ export function Totals({
         tone={gainColor(totals.dayGain)}
       />
     </div>
+  );
+}
+
+// Page-header Plaid state, shared by the Stocks tabs and the Bank page: a
+// green check once the account's item syncs automatically, else a button to
+// the right /plaid-link flow.
+export function PlaidLinkStatus({ linked, href }: { linked: boolean; href: string }) {
+  if (linked) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-emerald-400">
+        <CheckIcon className="h-3.5 w-3.5" />
+        Plaid linked
+      </span>
+    );
+  }
+  return (
+    <Link
+      to={href}
+      className="rounded-lg bg-zinc-800 px-3 py-1 text-xs font-medium text-zinc-100 hover:bg-zinc-700"
+    >
+      Link Plaid
+    </Link>
   );
 }
 

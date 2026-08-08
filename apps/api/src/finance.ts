@@ -2,7 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { PortfolioResponse, PortfolioRisk, Position, RiskTier, SectorSlice, StockAccount } from "@life/shared";
 import { events, metrics, syncRuns, type Db } from "@life/db";
 import { getHoldings } from "./connectors/fidelity";
-import { getNmHoldings } from "./connectors/plaid";
+import { getInvestmentHoldings } from "./connectors/plaid";
 import { fetchQuotes } from "./connectors/finnhub";
 import { fetchSymbolStats } from "./connectors/yahoo";
 
@@ -123,9 +123,36 @@ type AccountHolding = {
   costBasis: number | null;
   institutionPrice?: number | null;
   // False = `symbol` is a display fallback (NM cash / annuity sub-funds), not
-  // a real ticker — skip the quote providers. Absent (Fidelity) = quotable.
+  // a real ticker — skip the quote providers. Absent (Fidelity CSV) = quotable.
   quotable?: boolean;
+  // Cash positions (NM sweep, Fidelity money market): counted in market value
+  // and the Cash stat, but never quoted and carrying no gain semantics.
+  isCash?: boolean;
 };
+
+// Fidelity money-market/core-position symbols — cash in everything but name.
+// Finnhub can't quote them (403) and their NAV is pegged at $1, so mark them
+// cash and price at par: quantity = dollars. (Non-$1-NAV funds like FEDDX do
+// NOT belong here — par-pricing them fabricates a value.)
+const FIDELITY_CASH_SYMBOLS = new Set(["SPAXX", "FDRXX", "FZFXX", "FCASH", "FDIC"]);
+
+// Individual holdings with cash stamping: money-market rows get isCash, a $1
+// par price, and quotable:false (stops the pointless Finnhub 403 per cycle).
+// Fidelity's CSV leaves Quantity blank for the core position (the balance is
+// in Current Value), so at $1 par the dollars ARE the quantity.
+async function loadIndividualHoldings(db: Db): Promise<AccountHolding[]> {
+  return (await getHoldings(db)).map((h) => {
+    const isCash = h.isCash || FIDELITY_CASH_SYMBOLS.has(h.symbol);
+    if (!isCash) return h;
+    return {
+      ...h,
+      isCash,
+      quotable: false,
+      institutionPrice: h.institutionPrice ?? 1,
+      quantity: h.quantity ?? h.currentValue ?? null,
+    };
+  });
+}
 
 // Real-looking tickers only, and never display-fallback symbols — NM's cash
 // sweep is labeled "CASH", which is also a real NASDAQ ticker (Pathward).
@@ -141,8 +168,9 @@ const ACCOUNTS: Record<
   StockAccount,
   { source: string; loadHoldings: (db: Db) => Promise<AccountHolding[]> }
 > = {
-  individual: { source: "fidelity", loadHoldings: getHoldings },
-  nm: { source: "nm", loadHoldings: getNmHoldings },
+  individual: { source: "fidelity", loadHoldings: loadIndividualHoldings },
+  nm: { source: "nm", loadHoldings: (db) => getInvestmentHoldings(db, "nm") },
+  factset: { source: "factset", loadHoldings: (db) => getInvestmentHoldings(db, "factset") },
 };
 
 // Only real-looking tickers go to Finnhub/Yahoo — NM annuity sub-funds get a
@@ -221,9 +249,16 @@ export async function buildPortfolio(
   });
 
   const marketValue = sum(positions.map((p) => p.marketValue));
+  // Positions map 1:1 from holdings, so index i pairs them for the cash split.
+  const cashValue = sum(positions.map((p, i) => (holdings[i]!.isCash ? p.marketValue : null)));
   const costBasis = sum(positions.map((p) => p.costBasis));
   const totalGain = sum(positions.map((p) => p.totalGain));
-  const totalGainPct = totalGain != null && costBasis ? (totalGain / costBasis) * 100 : null;
+  // Sub-cent base = no meaningful denominator. A truthy check alone once let a
+  // 2e-13 float residue through and produced a 10^18 percent gain.
+  const totalGainPct =
+    totalGain != null && costBasis != null && Math.abs(costBasis) > 0.005
+      ? (totalGain / costBasis) * 100
+      : null;
   const dayGain = sum(positions.map((p) => p.dayGain));
   // Day % against yesterday's close value of the same positions, so the $ and
   // % always describe the same subset (positions with a quote).
@@ -249,6 +284,7 @@ export async function buildPortfolio(
   return {
     positions: positions.sort((a, b) => (b.marketValue ?? 0) - (a.marketValue ?? 0)),
     totals: {
+      cashValue,
       marketValue,
       costBasis,
       totalGain,
@@ -291,8 +327,7 @@ async function recordProviderRun(db: Db, source: string, fn: () => Promise<unkno
 // snapshots. buildPortfolio reuses the just-warmed 45s/12h caches, so the
 // providers are hit once per cycle, not once per account. Only the 5-min loop
 // calls this; page loads call buildPortfolio directly and don't record runs.
-export async function syncPortfolioSnapshot(db: Db, finnhubApiKey: string, nmLinked: boolean) {
-  const accounts: StockAccount[] = nmLinked ? ["individual", "nm"] : ["individual"];
+export async function syncPortfolioSnapshot(db: Db, finnhubApiKey: string, accounts: StockAccount[]) {
   const holdingLists = await Promise.all(accounts.map((a) => loadAccountHoldings(db, a)));
   const symbols = [...new Set(quotableSymbols(holdingLists.flat()))];
   await Promise.all([

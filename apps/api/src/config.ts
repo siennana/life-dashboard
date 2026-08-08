@@ -24,11 +24,19 @@ const envSchema = z.object({
   PLAID_CLIENT_ID: z.string().optional(),
   PLAID_SECRET: z.string().optional(),
   PLAID_ENV: z.enum(["sandbox", "production"]).default("production"),
-  PLAID_ACCESS_TOKEN: z.string().optional(),
+  // Bank item (transactions product) - the Bank page's spending data.
+  PLAID_US_BANK_ACCESS_TOKEN: z.string().optional(),
   // Second Plaid item: Northwestern Mutual, linked with the investments
   // product (holdings for the Stocks page's NM tab). Optional — the NM tab
   // shows a link CTA until it's set.
   PLAID_NM_ACCESS_TOKEN: z.string().optional(),
+  // Third Plaid item: the Fidelity individual account via the investments
+  // product. When set, holdings sync automatically (source "fidelity",
+  // replacing the CSV-upload data); the CSV button keeps working as a manual
+  // override between syncs.
+  PLAID_FIDELITY_ACCESS_TOKEN: z.string().optional(),
+  // GitHub PAT (classic, read:user scope only) for the contribution heatmap.
+  GITHUB_TOKEN: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -60,8 +68,8 @@ if (!env.ICLOUD_EMAIL || !env.ICLOUD_APP_PASSWORD) {
 }
 if (!env.PLAID_CLIENT_ID || !env.PLAID_SECRET) {
   warnings.push("PLAID_CLIENT_ID / PLAID_SECRET not set - bank spending sync disabled");
-} else if (!env.PLAID_ACCESS_TOKEN) {
-  warnings.push("PLAID_ACCESS_TOKEN not set - connect a bank at /plaid-link, then paste the token");
+} else if (!env.PLAID_US_BANK_ACCESS_TOKEN) {
+  warnings.push("PLAID_US_BANK_ACCESS_TOKEN not set - connect a bank at /plaid-link, then paste the token");
 }
 
 for (const w of warnings) console.warn(`[config] ${w}`);
@@ -81,7 +89,9 @@ export const config = {
   plaidClientId: env.PLAID_CLIENT_ID,
   plaidSecret: env.PLAID_SECRET,
   plaidEnv: env.PLAID_ENV,
-  plaidAccessToken: env.PLAID_ACCESS_TOKEN,
+  plaidUsBankAccessToken: env.PLAID_US_BANK_ACCESS_TOKEN,
   plaidNmAccessToken: env.PLAID_NM_ACCESS_TOKEN,
+  plaidFidelityAccessToken: env.PLAID_FIDELITY_ACCESS_TOKEN,
+  githubToken: env.GITHUB_TOKEN,
   warnings,
 };

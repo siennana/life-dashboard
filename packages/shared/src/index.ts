@@ -31,8 +31,10 @@ export const statusResponseSchema = z.object({
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 
 // Which stock account a portfolio request/response is about: "individual" =
-// the Fidelity CSV upload, "nm" = Northwestern Mutual via Plaid Investments.
-export const STOCK_ACCOUNTS = ["individual", "nm"] as const;
+// the Fidelity brokerage (CSV upload or Plaid), "nm" = Northwestern Mutual
+// via Plaid, "factset" = the FactSet 401k (same Fidelity Plaid item as
+// "individual", split out by account subtype).
+export const STOCK_ACCOUNTS = ["individual", "nm", "factset"] as const;
 export const stockAccountSchema = z.enum(STOCK_ACCOUNTS);
 export type StockAccount = z.infer<typeof stockAccountSchema>;
 
@@ -94,6 +96,9 @@ export type PortfolioRisk = z.infer<typeof portfolioRiskSchema>;
 export const portfolioResponseSchema = z.object({
   positions: z.array(positionSchema),
   totals: z.object({
+    // Value sitting in cash positions (NM sweep, Fidelity money market) —
+    // included in marketValue, broken out for the Cash stat.
+    cashValue: z.number().nullable(),
     marketValue: z.number().nullable(),
     costBasis: z.number().nullable(),
     totalGain: z.number().nullable(),
@@ -287,6 +292,52 @@ export const plaidExchangeInputSchema = z.object({
   public_token: z.string().min(10),
 });
 export type PlaidExchangeInput = z.infer<typeof plaidExchangeInputSchema>;
+
+// GitHub contribution counts (Home heatmap): one entry per day, zeros
+// included ("synced, nothing that day"), oldest first.
+export const contributionDaySchema = z.object({
+  date: z.string(), // YYYY-MM-DD
+  count: z.number(),
+});
+export type ContributionDay = z.infer<typeof contributionDaySchema>;
+
+export const contributionsResponseSchema = z.object({
+  configured: z.boolean(), // false = no GITHUB_TOKEN on this machine
+  days: z.array(contributionDaySchema),
+});
+export type ContributionsResponse = z.infer<typeof contributionsResponseSchema>;
+
+// Repos committed to in the past year (Projects page). Private repos the
+// read:user token can't see are folded into calendar counts but absent here.
+export const githubRepoSchema = z.object({
+  name: z.string(), // owner/name
+  url: z.string(),
+  isPrivate: z.boolean(),
+  commitsPastYear: z.number(),
+});
+export type GithubRepo = z.infer<typeof githubRepoSchema>;
+
+export const githubReposResponseSchema = z.object({
+  repos: z.array(githubRepoSchema), // sorted by commitsPastYear desc
+});
+export type GithubReposResponse = z.infer<typeof githubReposResponseSchema>;
+
+// Individual commits (default-branch, authored by the user) for the
+// day-detail panel. `ts` is the full commit timestamp; the client derives the
+// local calendar day from it.
+export const githubCommitSchema = z.object({
+  sha: z.string(),
+  repo: z.string(),
+  message: z.string(),
+  url: z.string(),
+  ts: z.string(),
+});
+export type GithubCommit = z.infer<typeof githubCommitSchema>;
+
+export const githubCommitsResponseSchema = z.object({
+  commits: z.array(githubCommitSchema), // newest first
+});
+export type GithubCommitsResponse = z.infer<typeof githubCommitsResponseSchema>;
 
 // Which Plaid product set to request at link time: "transactions" = the bank
 // item (spending), "investments" = the NM brokerage item (stock holdings).
