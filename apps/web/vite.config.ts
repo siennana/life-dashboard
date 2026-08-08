@@ -1,3 +1,4 @@
+import os from "node:os";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -8,7 +9,9 @@ export default defineConfig({
   envDir: "../..",
   server: {
     host: true, // reachable from iPhone via Tailscale
-    allowedHosts: [".ts.net"], // any Tailscale MagicDNS name (PC or laptop)
+    // Any Tailscale MagicDNS name (PC or laptop), plus this machine's bare
+    // hostname — MagicDNS search domains let devices use the short name too.
+    allowedHosts: [".ts.net", os.hostname().toLowerCase()],
     proxy: {
       "/api": "http://localhost:3001",
       "/health": "http://localhost:3001",
