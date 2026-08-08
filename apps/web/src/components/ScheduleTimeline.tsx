@@ -29,6 +29,10 @@ function timeLabel(hhmm: string) {
   return `${h12}:${String(m ?? 0).padStart(2, "0")} ${(h ?? 0) < 12 ? "AM" : "PM"}`;
 }
 
+// Stable default so an omitted `hiddenCalendars` prop doesn't re-trigger the
+// filter useMemo every render.
+const EMPTY_HIDDEN: ReadonlySet<string> = new Set();
+
 const exBase = (e: ExerciseRow) => e.description?.trim() || e.type;
 
 // Label for an exercise pinned to the top (no positionable time + duration):
@@ -150,20 +154,27 @@ export function ScheduleTimeline({
   gutter,
   className = "",
   onDateContextMenu,
+  showExercise = true,
+  hiddenCalendars = EMPTY_HIDDEN,
 }: {
   dates: string[];
   gutter: number; // left gutter (px) reserved for the hour labels
   className?: string; // extra classes for the scroll container (sizing)
   onDateContextMenu?: (e: React.MouseEvent, date: string) => void;
+  showExercise?: boolean; // calendar filter: hide exercise blocks/pins
+  hiddenCalendars?: ReadonlySet<string>; // calendar filter: excluded CalDAV calendar names
 }) {
   const events = useQuery({ queryKey: ["calendar-events"], queryFn: getCalendarEvents });
   const exercises = useQuery({ queryKey: ["exercises"], queryFn: getExercises });
   const datesKey = dates.join(",");
-  const byDate = useMemo(
-    () => buildSchedule(dates, events.data?.events ?? [], exercises.data?.exercises ?? []),
+  const byDate = useMemo(() => {
+    const visibleEvents = (events.data?.events ?? []).filter(
+      (e) => !hiddenCalendars.has(e.calendar ?? "Other"),
+    );
+    const visibleExercises = showExercise ? (exercises.data?.exercises ?? []) : [];
+    return buildSchedule(dates, visibleEvents, visibleExercises);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [events.data, exercises.data, datesKey],
-  );
+  }, [events.data, exercises.data, datesKey, showExercise, hiddenCalendars]);
 
   // Denser type in the multi-column (week) layout, where columns are narrow.
   const dense = dates.length > 1;

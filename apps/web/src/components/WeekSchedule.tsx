@@ -7,10 +7,14 @@ export function WeekSchedule({
   dates,
   gutter,
   onDateContextMenu,
+  showExercise,
+  hiddenCalendars,
 }: {
   dates: string[];
   gutter: number;
   onDateContextMenu?: (e: React.MouseEvent, date: string) => void;
+  showExercise?: boolean;
+  hiddenCalendars?: ReadonlySet<string>;
 }) {
   return (
     <ScheduleTimeline
@@ -18,6 +22,8 @@ export function WeekSchedule({
       gutter={gutter}
       className="min-h-0 flex-1"
       onDateContextMenu={onDateContextMenu}
+      showExercise={showExercise}
+      hiddenCalendars={hiddenCalendars}
     />
   );
 }

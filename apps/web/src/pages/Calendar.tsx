@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCalendarLastUpdated, getCashflow, getWeather, togglePeriodDay } from "../api";
 import type { CashflowDay } from "@life/shared";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
+import { BloodDropIcon, ExerciseIcon, FunnelIcon } from "../components/icons";
 import { quietBtnClass } from "../lib/controls";
 import { weatherEmoji } from "../lib/weather";
 import { usePeriodDays } from "../lib/period";
@@ -61,24 +62,82 @@ const todayClass = `${quietBtnClass} text-sm`;
 // bands all offset by it so their day columns line up.
 const SCAN_GUTTER = 30;
 
-// Circle style for a day number: red = menstruating, green = today (both = red
-// with a green ring), dimmed outside the current month. `small` for the
-// compressed rows of collapsed weeks.
-function dayNumClass(opts: { isPeriod: boolean; isToday: boolean; inMonth: boolean; small: boolean }) {
+// Circle style for a day number: green = today, dimmed outside the current
+// month. `small` for the compressed rows of collapsed weeks.
+function dayNumClass(opts: { isToday: boolean; inMonth: boolean; small: boolean }) {
   const size = opts.small ? "h-4 w-4 text-[10px]" : "h-6 w-6 text-xs";
-  const color =
-    opts.isPeriod && opts.isToday
-      ? "bg-red-600 font-semibold text-white ring-2 ring-emerald-400"
-      : opts.isPeriod
-        ? "bg-red-600 font-semibold text-white"
-        : opts.isToday
-          ? "bg-emerald-600 font-semibold text-white"
-          : opts.inMonth
-            ? "text-zinc-300"
-            : "text-zinc-600";
+  const color = opts.isToday
+    ? "bg-emerald-600 font-semibold text-white"
+    : opts.inMonth
+      ? "text-zinc-300"
+      : "text-zinc-600";
   // Animate width/height/font-size so the circle eases between full and small
   // as its week row expands/compresses (matches the row's flex-grow easing).
   return `inline-flex shrink-0 items-center justify-center rounded-full transition-all duration-300 ${size} ${color}`;
+}
+
+// Shared size for the datalet marks (period droplet + workout figure).
+const MARK_SIZE = "h-3.5 w-3.5";
+const dropletClass = `${MARK_SIZE} shrink-0 text-red-500`;
+const exerciseClass = `${MARK_SIZE} shrink-0 text-blue-400`;
+
+// The datalet marks grouped at a cell's bottom-left corner (droplet then
+// exercise figure, with a gap). Parent cell must be `relative`. Renders nothing
+// when both are off — compressed/squeezed cells pass false for both so no marks
+// show, matching how the weather/cashflow badges disappear there.
+function CornerMarks({ period, exercise }: { period: boolean; exercise: boolean }) {
+  if (!period && !exercise) return null;
+  return (
+    <span className="pointer-events-none absolute bottom-0.5 left-0.5 flex items-center gap-0.5">
+      {period && <BloodDropIcon className={dropletClass} />}
+      {exercise && <ExerciseIcon className={exerciseClass} />}
+    </span>
+  );
+}
+
+// The same datalet marks rendered inline — for the expanded-day header, where
+// they group next to the weather/cashflow badges instead of in a corner.
+function DataletBadges({ period, exercise }: { period: boolean; exercise: boolean }) {
+  return (
+    <>
+      {period && <BloodDropIcon className={dropletClass} />}
+      {exercise && <ExerciseIcon className={exerciseClass} />}
+    </>
+  );
+}
+
+// Checkbox that supports a visual indeterminate state (native `indeterminate`
+// is a DOM property, not an attribute/prop, so it needs a ref + effect) — used
+// for the CalDAV parent row when only some of its calendars are shown.
+function TriCheckbox({
+  label,
+  checked,
+  indeterminate = false,
+  onChange,
+  small = false,
+}: {
+  label: string;
+  checked: boolean;
+  indeterminate?: boolean;
+  onChange: () => void;
+  small?: boolean;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-zinc-700/50">
+      <input
+        ref={ref}
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        className="h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-0 focus:ring-offset-0"
+      />
+      <span className={`truncate text-zinc-200 ${small ? "text-xs" : "text-sm"}`}>{label}</span>
+    </label>
+  );
 }
 
 // One unified border around the whole drag range: every selected cell draws
@@ -171,8 +230,8 @@ export function CalendarPage() {
     setDayExpandedFrom(null);
   }
 
-  const { byDay, eventsByDay, exercises } = useDayData();
-  const weather = useQuery({ queryKey: ["weather"], queryFn: getWeather });
+  const { byDay, eventsByDay, exercises, calEvents } = useDayData();
+  const weather = useQuery({ queryKey: ["weather"], queryFn: () => getWeather() });
   const cashflow = useQuery({ queryKey: ["cashflow"], queryFn: getCashflow });
   const lastUpdated = useQuery({
     queryKey: ["calendar-last-updated"],
@@ -187,6 +246,61 @@ export function CalendarPage() {
         minute: "2-digit",
       })
     : null;
+
+  // What's shown on the calendar: Events (exercise, CalDAV — the latter as
+  // a set of *excluded* calendar names, so newly-synced calendars default to
+  // visible) and Data (cashflow/health/weather badges). All on by default.
+  const [showExercise, setShowExercise] = useState(true);
+  const [hiddenCalendars, setHiddenCalendars] = useState<Set<string>>(new Set());
+  const [showCashflow, setShowCashflow] = useState(true);
+  const [showHealth, setShowHealth] = useState(true);
+  const [showWeather, setShowWeather] = useState(true);
+  // The corner dumbbell marker — independent of the Events "Exercise" toggle
+  // (which controls chips/dots/schedule blocks), so a day can show the marker
+  // without the entries, or vice versa.
+  const [showExerciseMark, setShowExerciseMark] = useState(true);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+
+  // Distinct CalDAV calendar names seen in the fetched events (e.g. "Family",
+  // "Calendar"), sorted for a stable dropdown order.
+  const calendarNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of calEvents.data?.events ?? []) set.add(e.calendar ?? "Other");
+    return [...set].sort();
+  }, [calEvents.data]);
+
+  function toggleHiddenCalendar(name: string) {
+    setHiddenCalendars((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  // Tri-state for the CalDAV parent row: checked when nothing is hidden,
+  // unchecked when every known calendar is, indeterminate in between.
+  const allCalendarsShown = hiddenCalendars.size === 0;
+  const noCalendarsShown =
+    calendarNames.length > 0 && calendarNames.every((n) => hiddenCalendars.has(n));
+  const filtersActive =
+    !showExercise ||
+    !showExerciseMark ||
+    !showCashflow ||
+    !showHealth ||
+    !showWeather ||
+    hiddenCalendars.size > 0;
+
+  useEffect(() => {
+    if (!filterOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (filterRef.current?.contains(e.target as Node)) return;
+      setFilterOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [filterOpen]);
 
   // Right-click context menu for toggling a day as menstruating.
   const [menu, setMenu] = useState<{ x: number; y: number; date: string } | null>(null);
@@ -344,17 +458,14 @@ export function CalendarPage() {
     document.addEventListener("touchmove", onTouchMove, { passive: false });
   }
 
-  // Forecast high + code by day (today-forward, ~7 days), and the grid row that
-  // contains today — weather is shown only on that current-week row.
+  // Forecast high + code by day. The API already trims `daily` to today
+  // forward (~7 days), so any cell whose key is in the map gets weather —
+  // no row/week gating needed, it just naturally stops after a week out.
   const weatherByDay = useMemo(() => {
     const map = new Map<string, { code: number; tempMax: number }>();
     for (const d of weather.data?.daily ?? []) map.set(d.date, { code: d.code, tempMax: d.tempMax });
     return map;
   }, [weather.data]);
-  const currentWeekIndex = useMemo(
-    () => weeks.findIndex((week) => week.some((c) => dateKey(c.year, c.month, c.day) === todayKey)),
-    [weeks, todayKey],
-  );
 
   // Net cashflow per day (income − spend). Shown on any day with movement,
   // regardless of month — unlike weather, which is a current-week forecast.
@@ -371,13 +482,13 @@ export function CalendarPage() {
 
   // Day-number circle class with the per-day flags derived in one place.
   const dayNum = (key: string, inMonth: boolean, small: boolean) =>
-    dayNumClass({ isPeriod: periodDays.has(key), isToday: key === todayKey, inMonth, small });
+    dayNumClass({ isToday: key === todayKey, inMonth, small });
 
-  // The weather + cashflow badge pair every day header shows. Weather is a
-  // current-week-only forecast, so it needs the day's row index; `dense` is
-  // the compact 10px form for tight columns.
-  const dayBadges = (key: string, wi: number | null, dense = false) => {
-    const wx = wi === currentWeekIndex ? weatherByDay.get(key) : undefined;
+  // The weather + cashflow badge pair every day header shows — both gated by
+  // the filter dropdown's Data section. `dense` is the compact 10px form for
+  // tight columns.
+  const dayBadges = (key: string, dense = false) => {
+    const wx = showWeather ? weatherByDay.get(key) : undefined;
     return (
       <>
         {wx && (
@@ -390,10 +501,21 @@ export function CalendarPage() {
             <span className="tabular-nums">{wx.tempMax}°</span>
           </span>
         )}
-        <CashflowBadge day={cashflowByDay.get(key)} covered={isCashCovered(key)} />
+        {showCashflow && (
+          <CashflowBadge day={cashflowByDay.get(key)} covered={isCashCovered(key)} />
+        )}
       </>
     );
   };
+
+  // Events (CalDAV + exercise) visible for one day, gated by the filter
+  // dropdown's Events section — feeds DayChips and the month-cell dots.
+  const visibleEventsFor = (key: string) =>
+    (eventsByDay.get(key) ?? []).filter((e) => !hiddenCalendars.has(e.calendar ?? "Other"));
+  const visibleExercisesFor = (key: string) => (showExercise ? (byDay.get(key) ?? []) : []);
+  // Marker presence is independent of the Events "Exercise" toggle — it reads
+  // the raw data, gated only by its own `showExerciseMark`.
+  const hasExercise = (key: string) => (byDay.get(key)?.length ?? 0) > 0;
 
   // A window of years around now; widens automatically if data falls outside it.
   const years = useMemo(() => {
@@ -502,8 +624,8 @@ export function CalendarPage() {
                 >
                   {weekRow.map((cell, di) => {
                     const key = cellKey(cell);
-                    const dayEvents = eventsByDay.get(key) ?? [];
-                    const entries = byDay.get(key) ?? [];
+                    const dayEvents = visibleEventsFor(key);
+                    const entries = visibleExercisesFor(key);
                     const inDragSel =
                       dragSel !== null && dragSel.week === wi && di >= dragSel.a && di <= dragSel.b;
                     return (
@@ -520,12 +642,16 @@ export function CalendarPage() {
                             ? { boxShadow: dragSelShadow(di === dragSel.a, di === dragSel.b) }
                             : undefined
                         }
-                        className={`flex h-[4.75rem] min-w-0 select-none flex-col items-center gap-0.5 overflow-hidden border-r border-zinc-800/60 px-0.5 py-1 [-webkit-touch-callout:none] last:border-r-0 ${
+                        className={`relative flex h-[4.75rem] min-w-0 select-none flex-col items-center gap-0.5 overflow-hidden border-r border-zinc-800/60 px-0.5 py-1 [-webkit-touch-callout:none] last:border-r-0 ${
                           cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
                         }`}
                       >
+                        <CornerMarks
+                          period={showHealth && periodDays.has(key)}
+                          exercise={showExerciseMark && hasExercise(key)}
+                        />
                         <span className={dayNum(key, cell.inMonth, false)}>{cell.day}</span>
-                        {dayBadges(key, wi, true)}
+                        {dayBadges(key, true)}
                         {(dayEvents.length > 0 || entries.length > 0) && (
                           // Apple-style dots instead of text chips: violet =
                           // events, blue = exercises (capped, no counts).
@@ -562,18 +688,27 @@ export function CalendarPage() {
                         setDayExpandedFrom("selection");
                       }}
                       aria-label={`Open ${key}`}
-                      className="flex min-w-0 flex-1 flex-col items-center gap-0.5 overflow-hidden px-0.5 py-0.5"
+                      className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 overflow-hidden px-0.5 py-0.5"
                     >
+                      <CornerMarks
+                        period={showHealth && periodDays.has(key)}
+                        exercise={showExerciseMark && hasExercise(key)}
+                      />
                       <span className="text-[10px] uppercase tracking-wide text-zinc-500">
                         {WEEKDAYS[i]}
                       </span>
                       <span className={dayNum(key, cell.inMonth, false)}>{cell.day}</span>
-                      {dayBadges(key, expandedWeek, true)}
+                      {dayBadges(key, true)}
                     </button>
                   );
                 })}
               </div>
-              <WeekSchedule dates={selection} gutter={SCAN_GUTTER} />
+              <WeekSchedule
+                dates={selection}
+                gutter={SCAN_GUTTER}
+                showExercise={showExercise}
+                hiddenCalendars={hiddenCalendars}
+              />
             </div>
           )}
 
@@ -584,10 +719,14 @@ export function CalendarPage() {
                   {Number(expandedDay.slice(8))}
                 </span>
                 <span className="flex min-w-0 items-center gap-1.5">
-                  {dayBadges(expandedDay, expandedWeek, true)}
+                  <DataletBadges
+                    period={showHealth && periodDays.has(expandedDay)}
+                    exercise={showExerciseMark && hasExercise(expandedDay)}
+                  />
+                  {dayBadges(expandedDay, true)}
                 </span>
               </div>
-              <DayForm date={expandedDay} />
+              <DayForm date={expandedDay} showExercise={showExercise} hiddenCalendars={hiddenCalendars} />
             </div>
           )}
         </div>
@@ -651,6 +790,79 @@ export function CalendarPage() {
         >
           →
         </button>
+        <div ref={filterRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setFilterOpen((v) => !v)}
+            aria-label="Filter what's shown on the calendar"
+            aria-expanded={filterOpen}
+            className={`flex items-center gap-1.5 ${quietBtnClass}`}
+          >
+            <FunnelIcon className="h-3.5 w-3.5" />
+            <span className="text-sm">Filter</span>
+            {filtersActive && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />}
+          </button>
+          {filterOpen && (
+            <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded-lg border border-zinc-700 bg-zinc-800 p-2 shadow-xl">
+              <div className="px-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                Events
+              </div>
+              <div className="mt-1">
+                <TriCheckbox
+                  label="Exercise"
+                  checked={showExercise}
+                  onChange={() => setShowExercise((v) => !v)}
+                />
+                <TriCheckbox
+                  label="CalDAV"
+                  checked={allCalendarsShown}
+                  indeterminate={!allCalendarsShown && !noCalendarsShown}
+                  onChange={() =>
+                    setHiddenCalendars(allCalendarsShown ? new Set(calendarNames) : new Set())
+                  }
+                />
+                {calendarNames.length > 0 && (
+                  <div className="ml-2 space-y-0.5 border-l border-zinc-700/60 pl-2">
+                    {calendarNames.map((name) => (
+                      <TriCheckbox
+                        key={name}
+                        label={name}
+                        small
+                        checked={!hiddenCalendars.has(name)}
+                        onChange={() => toggleHiddenCalendar(name)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 px-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                Datalet
+              </div>
+              <div className="mt-1">
+                <TriCheckbox
+                  label="Exercise"
+                  checked={showExerciseMark}
+                  onChange={() => setShowExerciseMark((v) => !v)}
+                />
+                <TriCheckbox
+                  label="Cashflow"
+                  checked={showCashflow}
+                  onChange={() => setShowCashflow((v) => !v)}
+                />
+                <TriCheckbox
+                  label="Health"
+                  checked={showHealth}
+                  onChange={() => setShowHealth((v) => !v)}
+                />
+                <TriCheckbox
+                  label="Weather"
+                  checked={showWeather}
+                  onChange={() => setShowWeather((v) => !v)}
+                />
+              </div>
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -728,6 +940,7 @@ export function CalendarPage() {
                               cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
                             }`}
                           >
+                            {/* Squeezed sliver: no datalet marks (same as compressed cells). */}
                             <span className={dayNum(key, cell.inMonth, true)}>{cell.day}</span>
                           </button>
                         );
@@ -761,7 +974,11 @@ export function CalendarPage() {
                                     {c.day}
                                   </button>
                                   <span className="flex min-w-0 items-center gap-1">
-                                    {dayBadges(k, wi, true)}
+                                    <DataletBadges
+                                      period={showHealth && periodDays.has(k)}
+                                      exercise={showExerciseMark && hasExercise(k)}
+                                    />
+                                    {dayBadges(k, true)}
                                   </span>
                                 </div>
                               );
@@ -772,6 +989,8 @@ export function CalendarPage() {
                               dates={selection}
                               gutter={SCAN_GUTTER}
                               onDateContextMenu={openContextMenu}
+                              showExercise={showExercise}
+                              hiddenCalendars={hiddenCalendars}
                             />
                           </div>
                           <div className="flex min-h-0 grow-[2] basis-0">
@@ -796,8 +1015,8 @@ export function CalendarPage() {
                     const key = cellKey(cell);
                     const inDragSel =
                       dragSel !== null && dragSel.week === wi && di >= dragSel.a && di <= dragSel.b;
-                    const entries = byDay.get(key) ?? [];
-                    const dayEvents = eventsByDay.get(key) ?? [];
+                    const entries = visibleExercisesFor(key);
+                    const dayEvents = visibleEventsFor(key);
                     const isDayExpanded = isExpanded && expandedDay === key;
                     // Siblings of an expanded day squeeze to a fixed width that
                     // fits just the (small) day number (basis-6 = number +
@@ -808,7 +1027,7 @@ export function CalendarPage() {
                     const dayNumberClass = dayNum(key, cell.inMonth, isCompressed || isDaySqueezed);
                     // Weather (current-week forecast) then cashflow, right-aligned.
                     const rightBadges = !isCompressed && !isDaySqueezed && (
-                      <span className="flex min-w-0 items-center gap-1.5">{dayBadges(key, wi)}</span>
+                      <span className="flex min-w-0 items-center gap-1.5">{dayBadges(key)}</span>
                     );
 
                     // The expanded day hosts a form with real inputs (the log
@@ -835,6 +1054,8 @@ export function CalendarPage() {
                             cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
                           }`}
                         >
+                          {/* Datalets sit inline with weather/cashflow up here,
+                              not as corner marks (expanded-day layout). */}
                           <div className="flex shrink-0 items-center justify-between gap-1">
                             <button
                               type="button"
@@ -844,9 +1065,17 @@ export function CalendarPage() {
                             >
                               {cell.day}
                             </button>
-                            {rightBadges}
+                            {/* Order: datalets then dayBadges (weather, cashflow),
+                                so cashflow lands on the far right. */}
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <DataletBadges
+                                period={showHealth && periodDays.has(key)}
+                                exercise={showExerciseMark && hasExercise(key)}
+                              />
+                              {dayBadges(key)}
+                            </span>
                           </div>
-                          <DayForm date={key} />
+                          <DayForm date={key} showExercise={showExercise} hiddenCalendars={hiddenCalendars} />
                         </div>
                       );
                     }
@@ -866,12 +1095,20 @@ export function CalendarPage() {
                             ? { boxShadow: dragSelShadow(di === dragSel.a, di === dragSel.b) }
                             : undefined
                         }
-                        className={`flex select-none flex-col overflow-hidden border-r border-zinc-800/60 text-left transition-[flex-grow,flex-basis,padding] duration-300 [-webkit-touch-callout:none] last:border-r-0 hover:bg-zinc-800/40 ${
+                        className={`relative flex select-none flex-col overflow-hidden border-r border-zinc-800/60 text-left transition-[flex-grow,flex-basis,padding] duration-300 [-webkit-touch-callout:none] last:border-r-0 hover:bg-zinc-800/40 ${
                           isDaySqueezed ? "grow-0 basis-6" : "grow basis-0"
                         } ${isCompressed || isDaySqueezed ? "p-0.5" : "p-1.5"} ${
                           cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
                         }`}
                       >
+                        {/* Corner marks hide in compressed/squeezed cells, same
+                            as the weather/cashflow badges. */}
+                        {!isCompressed && !isDaySqueezed && (
+                          <CornerMarks
+                            period={showHealth && periodDays.has(key)}
+                            exercise={showExerciseMark && hasExercise(key)}
+                          />
+                        )}
                         <div className="flex items-center justify-between gap-1">
                           <span className={dayNumberClass}>{cell.day}</span>
                           {rightBadges}
@@ -911,9 +1148,9 @@ export function CalendarPage() {
               onClick={() => toggle.mutate({ date: menu.date })}
               className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-zinc-200 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <span
-                className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${
-                  periodDays.has(menu.date) ? "bg-red-500" : "border border-zinc-500"
+              <BloodDropIcon
+                className={`h-3.5 w-3.5 shrink-0 ${
+                  periodDays.has(menu.date) ? "text-red-500" : "text-zinc-500"
                 }`}
               />
               menstruating

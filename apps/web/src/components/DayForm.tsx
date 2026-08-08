@@ -96,7 +96,15 @@ function TransactionsForDay({ date }: { date: string }) {
 // The widened-day form. Left column: log + todos + transactions. Right column:
 // schedule. On mobile the columns stack (page scrolls) and the schedule gets a
 // fixed height so its timeline still scrolls internally.
-export function DayForm({ date }: { date: string }) {
+export function DayForm({
+  date,
+  showExercise,
+  hiddenCalendars,
+}: {
+  date: string;
+  showExercise?: boolean;
+  hiddenCalendars?: ReadonlySet<string>;
+}) {
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 md:grid-cols-2">
       <div className="flex min-h-0 flex-col gap-2">
@@ -105,7 +113,7 @@ export function DayForm({ date }: { date: string }) {
         <TransactionsForDay date={date} />
       </div>
       <div className="flex h-96 min-h-0 flex-col md:h-auto">
-        <DaySchedule date={date} />
+        <DaySchedule date={date} showExercise={showExercise} hiddenCalendars={hiddenCalendars} />
       </div>
     </div>
   );
