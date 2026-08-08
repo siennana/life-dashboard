@@ -8,6 +8,7 @@ export default defineConfig({
   envDir: "../..",
   server: {
     host: true, // reachable from iPhone via Tailscale
+    allowedHosts: [".ts.net"], // any Tailscale MagicDNS name (PC or laptop)
     proxy: {
       "/api": "http://localhost:3001",
       "/health": "http://localhost:3001",
