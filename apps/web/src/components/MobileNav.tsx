@@ -1,45 +1,12 @@
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { NAV_ITEMS, type NavItem } from "../nav";
 import { useIsMobile } from "../lib/useIsMobile";
+import { ChevronLeftIcon, ChevronRightIcon } from "./icons";
 
 // Mobile navigation (below the `md` breakpoint): the index route (`/`) shows
 // the nav tree as a full-screen menu, and every page gets a sticky header
 // with a back-to-menu button + breadcrumbs. Desktop never sees any of this —
 // `/` redirects to /home and the sidebar handles navigation.
-
-function ChevronRight() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      className="h-4 w-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M6 4l4 4-4 4" />
-    </svg>
-  );
-}
-
-function ChevronLeft() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      className="h-4.5 w-4.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M10 4L6 8l4 4" />
-    </svg>
-  );
-}
 
 // One tappable row — taller than the desktop sidebar rows on purpose
 // (comfortable touch target), trailing chevron as the "drills in" affordance.
@@ -51,7 +18,7 @@ function MenuRow({ item }: { item: NavItem }) {
     >
       <span className="truncate">{item.label}</span>
       <span className="shrink-0 text-zinc-500">
-        <ChevronRight />
+        <ChevronRightIcon className="h-4 w-4" />
       </span>
     </Link>
   );
@@ -121,7 +88,7 @@ export function MobileHeader() {
         aria-label="Back to menu"
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-300 active:bg-zinc-800"
       >
-        <ChevronLeft />
+        <ChevronLeftIcon className="h-4.5 w-4.5" />
       </Link>
       <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
         {crumbs.map((crumb, i) =>

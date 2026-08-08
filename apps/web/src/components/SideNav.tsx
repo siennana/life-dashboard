@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { NAV_ITEMS, type NavItem } from "../nav";
+import { ChevronRightIcon, GearIcon } from "./icons";
 
 // Sidebar width is a per-window layout dimension (like a scroll position),
 // not a synced preference, so it lives in localStorage rather than the
@@ -19,21 +20,12 @@ function readStoredWidth(): number {
 // items (files get an aligned blank in the chevron column), flat full-row
 // highlight, and an indent-guide line down the left of nested children.
 
+// A `>` chevron that rotates 90deg to point down when expanded (codicon-style).
 function Chevron({ open }: { open: boolean }) {
-  // A `>` chevron that rotates 90deg to point down when expanded (codicon-style).
   return (
-    <svg
-      viewBox="0 0 16 16"
+    <ChevronRightIcon
       className={`h-3.5 w-3.5 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.6}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M6 4l4 4-4 4" />
-    </svg>
+    />
   );
 }
 
@@ -97,25 +89,6 @@ function NavEntry({ item }: { item: NavItem }) {
         </ul>
       )}
     </li>
-  );
-}
-
-// Lucide-style gear for the pinned Settings entry.
-function GearIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-3.5 w-3.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
   );
 }
 
@@ -215,7 +188,7 @@ export function SideNav() {
             <li key={item.path}>
               <NavLink to={item.path} className={({ isActive }) => rowClass(isActive)}>
                 <span className="flex w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
-                  <GearIcon />
+                  <GearIcon className="h-3.5 w-3.5" />
                 </span>
                 <span className="truncate">{item.label}</span>
               </NavLink>

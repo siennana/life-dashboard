@@ -10,7 +10,7 @@ import {
   type TodoRow,
 } from "../api";
 import { compareTodos, CompleteButton, DueDate } from "../lib/todos";
-import { RefreshIcon } from "../components/SyncStatus";
+import { RefreshIcon } from "../components/icons";
 
 const fmtDateTime = (d: string | Date) =>
   new Date(d).toLocaleString(undefined, {

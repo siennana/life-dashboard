@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SyncProcessStatus } from "@life/shared";
 import { getStatusTimed, syncSource } from "../api";
+import { RefreshIcon } from "./icons";
 
 // Last sync time for one process (lastRun), or "—" while running/never.
 const fmtTime = (d: Date | string | null) =>
@@ -20,25 +21,6 @@ const STATUS_STYLE: Record<SyncProcessStatus, string> = {
   idle: "text-zinc-500",
   off: "text-zinc-600",
 };
-
-// Circular-arrow refresh icon; spins while a sync is in flight.
-export function RefreshIcon({ spinning }: { spinning: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={`h-3.5 w-3.5 ${spinning ? "animate-spin" : ""}`}
-      aria-hidden="true"
-    >
-      <polyline points="23 4 23 10 17 10" />
-      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-    </svg>
-  );
-}
 
 // Per-row Sync button. Triggers the connector, then refreshes the status widget
 // and that source's data. DB-mutating, so it carries cursor-pointer.
