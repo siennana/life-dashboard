@@ -121,6 +121,30 @@ function buildSchedule(
   return map;
 }
 
+const MIN_BLOCK_PX = 15; // floor so a short event (e.g. a 15min run) stays visible
+const BLOCK_GAP_PX = 1; // hairline surface gap between back-to-back blocks
+
+// Pixel top/height per block, in the same order as `blocks` (already sorted by
+// startMin). The MIN_BLOCK_PX floor can make a short event's raw height exceed
+// its real duration; capping each block's bottom to the next block's top keeps
+// that floor from bleeding into (visually overlapping) whatever follows it —
+// e.g. a 12:30 event lasting 15min butting right up against a 12:45 event.
+function layoutBlocks(blocks: Block[], hourH: number): { top: number; height: number }[] {
+  const raw = blocks.map((b) => ({
+    top: (b.startMin / 60) * hourH,
+    height: Math.max(((b.endMin - b.startMin) / 60) * hourH, MIN_BLOCK_PX),
+  }));
+  for (let i = 0; i < raw.length - 1; i++) {
+    const cur = raw[i]!;
+    const nextTop = raw[i + 1]!.top;
+    const maxBottom = nextTop - BLOCK_GAP_PX;
+    if (cur.top + cur.height > maxBottom) {
+      cur.height = Math.max(maxBottom - cur.top, 4); // never fully collapse
+    }
+  }
+  return raw;
+}
+
 export function ScheduleTimeline({
   dates,
   gutter,
@@ -211,20 +235,20 @@ export function ScheduleTimeline({
             onContextMenu={onDateContextMenu ? (e) => onDateContextMenu(e, d) : undefined}
             className={`relative min-w-0 flex-1 ${colBorder}`}
           >
-            {(byDate.get(d)?.blocks ?? []).map((b) => {
-              const top = (b.startMin / 60) * hourH;
-              const height = Math.max(((b.endMin - b.startMin) / 60) * hourH, 15);
-              return (
+            {(() => {
+              const blocks = byDate.get(d)?.blocks ?? [];
+              const laidOut = layoutBlocks(blocks, hourH);
+              return blocks.map((b, i) => (
                 <div
                   key={b.key}
                   title={b.title}
-                  style={{ top, height }}
+                  style={laidOut[i]}
                   className={`absolute inset-x-0.5 overflow-hidden rounded px-1 leading-tight ring-1 ring-inset ${blockText} ${BLOCK_CLASS[b.kind]}`}
                 >
                   <span className="font-medium">{b.timeText}</span> {b.label}
                 </div>
-              );
-            })}
+              ));
+            })()}
           </div>
         ))}
       </div>
