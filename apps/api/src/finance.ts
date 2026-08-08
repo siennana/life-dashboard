@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { PortfolioResponse, PortfolioRisk, Position, RiskTier, SectorSlice } from "@life/shared";
-import { events, metrics, type Db } from "@life/db";
+import { events, metrics, syncRuns, type Db } from "@life/db";
 import { getHoldings } from "./connectors/fidelity";
 import { fetchQuotes } from "./connectors/finnhub";
 import { fetchSymbolStats } from "./connectors/yahoo";
@@ -218,6 +218,39 @@ export async function buildPortfolio(
     holdingsAsOf: await loadHoldingsAsOf(db),
     quotesConfigured,
   };
+}
+
+// Record one sync_run around `fn`. A provider failing is logged as an error run
+// but never rethrown, so one provider can't block the other or the snapshot.
+async function recordProviderRun(db: Db, source: string, fn: () => Promise<unknown>) {
+  const run = (await db.insert(syncRuns).values({ source }).returning())[0]!;
+  try {
+    await fn();
+    await db
+      .update(syncRuns)
+      .set({ finishedAt: new Date(), status: "ok" })
+      .where(eq(syncRuns.id, run.id));
+  } catch (err) {
+    await db
+      .update(syncRuns)
+      .set({ finishedAt: new Date(), status: "error", error: String(err) })
+      .where(eq(syncRuns.id, run.id));
+  }
+}
+
+// Scheduled market-data snapshot: contacts Finnhub (quotes) and Yahoo (stats),
+// recording a sync_run per provider so each is its own row in the Sync status
+// widget, then prices the portfolio + upserts today's value snapshot.
+// buildPortfolio reuses the just-warmed 45s/12h caches, so the providers are hit
+// once per cycle, not twice. Only the 5-min loop calls this; page loads call
+// buildPortfolio directly and don't record runs.
+export async function syncPortfolioSnapshot(db: Db, finnhubApiKey: string) {
+  const symbols = (await getHoldings(db)).map((h) => h.symbol);
+  await Promise.all([
+    recordProviderRun(db, "finnhub", () => fetchQuotes(symbols, finnhubApiKey)),
+    recordProviderRun(db, "yahoo", () => fetchSymbolStats(symbols)),
+  ]);
+  await buildPortfolio(db, finnhubApiKey);
 }
 
 // The CSV import stamps startTs = upload time on every holding row, so the

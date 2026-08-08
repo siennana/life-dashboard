@@ -176,7 +176,7 @@ export function Todos() {
   const queryClient = useQueryClient();
   const todos = useQuery({ queryKey: ["todos"], queryFn: getTodos });
   const status = useQuery({ queryKey: ["status"], queryFn: getStatusTimed });
-  const lastSync = status.data?.sources.find((s) => s.source === "todoist")?.finished_at;
+  const lastSync = status.data?.processes.find((p) => p.key === "todoist")?.lastRun;
   const complete = useMutation({
     mutationFn: closeTodo,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["todos"] }),

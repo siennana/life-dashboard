@@ -4,27 +4,29 @@ export const SOURCES = ["todoist", "strava", "health", "calendar", "vault", "fid
 export const sourceSchema = z.enum(SOURCES);
 export type Source = z.infer<typeof sourceSchema>;
 
-export const syncStatusSchema = z.object({
-  source: z.string(),
-  started_at: z.coerce.date(),
-  finished_at: z.coerce.date().nullable(),
-  status: z.enum(["running", "ok", "error"]),
-  error: z.string().nullable(),
-});
-export type SyncStatus = z.infer<typeof syncStatusSchema>;
+// One row in the Sync status widget = one automated/background process. Covers
+// every source that resyncs or hits an external service on a schedule, plus the
+// live DB connectivity check. `type` is the connection kind (Database / REST
+// API / CalDAV / ...); `cadence` is how often it runs ("every 5 min", "live",
+// "manual"); `status` folds sync_runs state with config presence ("off" = creds
+// missing on this machine, "idle" = configured but not run yet).
+export const SYNC_PROCESS_STATUSES = ["ok", "error", "running", "idle", "off"] as const;
+export const syncProcessStatusSchema = z.enum(SYNC_PROCESS_STATUSES);
+export type SyncProcessStatus = z.infer<typeof syncProcessStatusSchema>;
 
-// Live connectivity check against the Postgres backend (Neon), distinct from
-// sync_runs since the DB connection isn't a connector that runs on a schedule.
-export const dbStatusSchema = z.object({
-  status: z.enum(["ok", "error"]),
-  checkedAt: z.coerce.date(),
+export const syncProcessSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  type: z.string(),
+  cadence: z.string(),
+  status: syncProcessStatusSchema,
+  lastRun: z.coerce.date().nullable(),
   error: z.string().nullable(),
 });
-export type DbStatus = z.infer<typeof dbStatusSchema>;
+export type SyncProcess = z.infer<typeof syncProcessSchema>;
 
 export const statusResponseSchema = z.object({
-  sources: z.array(syncStatusSchema),
-  database: dbStatusSchema,
+  processes: z.array(syncProcessSchema),
 });
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 

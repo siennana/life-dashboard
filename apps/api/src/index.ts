@@ -5,7 +5,7 @@ import { createDb, events } from "@life/db";
 import { config } from "./config";
 import { closeTodoistTask, syncTodoist } from "./connectors/todoist";
 import { importFidelityCsv } from "./connectors/fidelity";
-import { buildPortfolio } from "./finance";
+import { buildPortfolio, syncPortfolioSnapshot } from "./finance";
 import { createExercise, deleteExercise, listExercises, updateExercise } from "./exercise";
 import { createBook, deleteBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
@@ -27,6 +27,8 @@ import {
   plaidExchangeInputSchema,
   saveDayLogInputSchema,
   uiSettingsSchema,
+  type SyncProcess,
+  type SyncProcessStatus,
 } from "@life/shared";
 
 const app = Fastify({ logger: true });
@@ -66,22 +68,91 @@ app.get("/health", async () => {
   }
 });
 
-// Latest sync run per source, plus a live DB ping — powers the sync-status widget.
+// How often the background sync loop runs (see runSyncs at the bottom). One
+// constant so the loop and the widget's "Interval" column can't drift.
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+// H:MM:SS clock format, e.g. 300000ms -> "0:05:00".
+function clockCadence(ms: number): string {
+  const total = Math.round(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+const CADENCE_INTERVAL = clockCadence(SYNC_INTERVAL_MS);
+
+// Registry of every automated/background process the Sync status widget tracks:
+// display label, connection type, cadence, whether this machine is configured
+// for it, and its sync_runs source key. Order = display order (after the DB row).
+type ProcessDef = {
+  key: string;
+  label: string;
+  type: string;
+  cadence: string;
+  configured: boolean;
+};
+function processDefs(): ProcessDef[] {
+  return [
+    { key: "todoist", label: "Todoist", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.todoistApiToken) },
+    { key: "calendar", label: "CalDAV", type: "CalDAV", cadence: CADENCE_INTERVAL, configured: Boolean(config.icloudEmail && config.icloudAppPassword) },
+    { key: "plaid", label: "Plaid", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidAccessToken) },
+    // Both hit only by the market snapshot, which is gated on the Finnhub key.
+    { key: "finnhub", label: "Finnhub", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
+    { key: "yahoo", label: "Yahoo Finance", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
+    { key: "fidelity", label: "Fidelity", type: "CSV upload", cadence: "manual", configured: true },
+  ];
+}
+
+// The automated processes, each merged with its latest sync_runs row, plus a
+// live DB ping as the first row — powers the sync-status widget.
 app.get("/api/status", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
-  const rows = await db.execute(sql`
-    select distinct on (source) source, started_at, finished_at, status, error
+  const rows = (await db.execute(sql`
+    select distinct on (source) source, finished_at, status, error
     from sync_runs
     order by source, started_at desc
-  `);
-  let database: { status: "ok" | "error"; checkedAt: Date; error: string | null };
+  `)) as unknown as { source: string; finished_at: Date | null; status: string; error: string | null }[];
+  const runs = new Map(rows.map((r) => [r.source, r]));
+
+  let dbOk = true;
+  let dbError: string | null = null;
   try {
     await db.execute(sql`select 1`);
-    database = { status: "ok", checkedAt: new Date(), error: null };
   } catch (err) {
-    database = { status: "error", checkedAt: new Date(), error: String(err) };
+    dbOk = false;
+    dbError = String(err);
   }
-  return { sources: rows, database };
+
+  const processes: SyncProcess[] = [
+    {
+      key: "database",
+      label: "Neon",
+      type: "Database",
+      cadence: "live",
+      status: dbOk ? "ok" : "error",
+      lastRun: new Date(),
+      error: dbError,
+    },
+    ...processDefs().map((def): SyncProcess => {
+      const run = runs.get(def.key);
+      const status: SyncProcessStatus = !def.configured
+        ? "off"
+        : run
+          ? (run.status as SyncProcessStatus)
+          : "idle";
+      return {
+        key: def.key,
+        label: def.label,
+        type: def.type,
+        cadence: def.cadence,
+        status,
+        lastRun: run?.finished_at ?? null,
+        error: run?.error ?? null,
+      };
+    }),
+  ];
+
+  return { processes };
 });
 
 app.get("/api/todos", async (_req, reply) => {
@@ -407,9 +478,9 @@ app.listen({ port: config.port, host: "0.0.0.0" }).catch((err) => {
   process.exit(1);
 });
 
-// Pull-based connectors: sync on boot, then every 5 minutes. Each configured
-// connector runs independently — one failing must not block the others.
-const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+// Pull-based connectors: sync on boot, then every 5 minutes (SYNC_INTERVAL_MS,
+// defined up by the status route). Each configured connector runs independently
+// — one failing must not block the others.
 let syncing = false;
 async function runSyncs() {
   const activeDb = db;
@@ -438,14 +509,14 @@ async function runSyncs() {
         app.log.error({ err }, "plaid sync failed");
       }
     }
-    // Daily portfolio-value snapshot: buildPortfolio upserts today's metrics
-    // row as a side effect, so the series accumulates even on days the Stocks
-    // page is never opened. Quotes come from cache when the page was just up.
+    // Market data: price the portfolio + upsert today's value snapshot, and
+    // record a sync_run under "market" so it shows in the status widget. The
+    // metrics series accumulates even on days the Stocks page is never opened.
     if (config.finnhubApiKey) {
       try {
-        await buildPortfolio(activeDb, config.finnhubApiKey);
+        await syncPortfolioSnapshot(activeDb, config.finnhubApiKey);
       } catch (err) {
-        app.log.error({ err }, "portfolio snapshot failed");
+        app.log.error({ err }, "market snapshot failed");
       }
     }
   } finally {

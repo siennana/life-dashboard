@@ -1,15 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { SyncProcessStatus } from "@life/shared";
 import { getStatusTimed, syncSource } from "../api";
 
-// Last sync time for one source (finished_at), or "—" while running/never.
+// Last sync time for one process (lastRun), or "—" while running/never.
 const fmtTime = (d: Date | string | null) =>
   d ? new Date(d).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
-
-// sync_runs stores the connector's internal source key, which doesn't always
-// match what should show on screen (the calendar connector is iCloud CalDAV).
-const SOURCE_LABELS: Record<string, string> = {
-  calendar: "CalDAV",
-};
 
 // Sources that expose an on-demand Sync button, mapped to the data query to
 // refetch once the sync finishes (["status"] is always invalidated too).
@@ -18,9 +13,13 @@ const SYNC_BUTTON_QUERIES: Record<string, string> = {
   calendar: "calendar-events",
 };
 
-function labelFor(source: string) {
-  return SOURCE_LABELS[source] ?? source.charAt(0).toUpperCase() + source.slice(1);
-}
+const STATUS_STYLE: Record<SyncProcessStatus, string> = {
+  ok: "text-emerald-400",
+  error: "text-red-400",
+  running: "text-amber-400",
+  idle: "text-zinc-500",
+  off: "text-zinc-600",
+};
 
 // Circular-arrow refresh icon; spins while a sync is in flight.
 export function RefreshIcon({ spinning }: { spinning: boolean }) {
@@ -43,7 +42,7 @@ export function RefreshIcon({ spinning }: { spinning: boolean }) {
 
 // Per-row Sync button. Triggers the connector, then refreshes the status widget
 // and that source's data. DB-mutating, so it carries cursor-pointer.
-function SyncButton({ source }: { source: string }) {
+function SyncButton({ source, label }: { source: string; label: string }) {
   const queryClient = useQueryClient();
   const sync = useMutation({
     mutationFn: () => syncSource(source),
@@ -57,18 +56,19 @@ function SyncButton({ source }: { source: string }) {
       type="button"
       onClick={() => sync.mutate()}
       disabled={sync.isPending}
-      aria-label={`Sync ${labelFor(source)}`}
-      title={`Sync ${labelFor(source)}`}
-      className="flex w-14 cursor-pointer justify-end text-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+      aria-label={`Sync ${label}`}
+      title={`Sync ${label}`}
+      className="flex cursor-pointer justify-end text-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
     >
       <RefreshIcon spinning={sync.isPending} />
     </button>
   );
 }
 
-// Latest sync run per source, plus a live Neon connectivity check. Self-contained
-// (owns its query) so it can drop onto any page. Header shows how long the status
-// read took (Neon can be slow on a cold start); each row shows its last-sync time.
+// Every automated process (connectors + the live Neon check), one row each, with
+// its type, cadence, last-run time, and health. Self-contained (owns its query)
+// so it can drop onto any page. Header shows how long the status read took (Neon
+// can be slow on a cold start).
 export function SyncStatus() {
   const status = useQuery({ queryKey: ["status"], queryFn: getStatusTimed });
 
@@ -85,45 +85,38 @@ export function SyncStatus() {
         <p className="mt-3 text-red-400">Cannot reach API — {(status.error as Error).message}</p>
       )}
       {status.isSuccess && (
-        <ul className="mt-3 space-y-2">
-          <li className="flex items-center justify-between text-sm">
-            <span>Neon</span>
-            <span className="flex items-center gap-3">
-              <span className="text-xs text-zinc-500">{fmtTime(status.data.database.checkedAt)}</span>
-              <span
-                className={`w-14 text-right ${
-                  status.data.database.status === "error" ? "text-red-400" : "text-emerald-400"
-                }`}
-              >
-                {status.data.database.status}
-              </span>
-              <span className="w-14" />
-            </span>
-          </li>
-          {status.data.sources.length === 0 && (
-            <li className="text-zinc-400">No connectors synced yet.</li>
-          )}
-          {status.data.sources.map((s) => (
-            <li key={s.source} className="flex items-center justify-between text-sm">
-              <span>{labelFor(s.source)}</span>
-              <span className="flex items-center gap-3">
-                <span className="text-xs text-zinc-500">{fmtTime(s.finished_at)}</span>
-                <span
-                  className={`w-14 text-right ${
-                    s.status === "error" ? "text-red-400" : "text-emerald-400"
-                  }`}
-                >
-                  {s.status}
-                </span>
-                {s.source in SYNC_BUTTON_QUERIES ? (
-                  <SyncButton source={s.source} />
-                ) : (
-                  <span className="w-14" />
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-zinc-500">
+                <th className="pb-2 pr-4 font-medium">Service</th>
+                <th className="pb-2 pr-4 font-medium">Type</th>
+                <th className="pb-2 pr-4 font-medium">Interval</th>
+                <th className="pb-2 pr-4 font-medium">Last sync</th>
+                <th className="pb-2 pr-4 font-medium">Status</th>
+                <th className="pb-2 font-medium" aria-label="Sync" />
+              </tr>
+            </thead>
+            <tbody>
+              {status.data.processes.map((p) => (
+                <tr key={p.key} className="border-t border-zinc-800/60">
+                  <td className="py-2 pr-4 text-zinc-200">{p.label}</td>
+                  <td className="whitespace-nowrap py-2 pr-4 text-zinc-400">{p.type}</td>
+                  <td className="whitespace-nowrap py-2 pr-4 text-zinc-400">{p.cadence}</td>
+                  <td className="whitespace-nowrap py-2 pr-4 text-xs text-zinc-500">
+                    {fmtTime(p.lastRun)}
+                  </td>
+                  <td className={`py-2 pr-4 ${STATUS_STYLE[p.status]}`} title={p.error ?? undefined}>
+                    {p.status}
+                  </td>
+                  <td className="w-6 py-2">
+                    {p.key in SYNC_BUTTON_QUERIES && <SyncButton source={p.key} label={p.label} />}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
