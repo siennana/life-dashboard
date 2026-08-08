@@ -19,7 +19,18 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Finance",
     implemented: true,
     children: [
-      { path: "/finance/stocks", label: "Stocks", implemented: true },
+      {
+        path: "/finance/stocks",
+        label: "Stocks",
+        implemented: true,
+        // One route per account tab — the Stocks page's folder tabs and these
+        // nav entries drive the same URL (/finance/stocks redirects to the
+        // last-viewed one).
+        children: [
+          { path: "/finance/stocks/individual", label: "Individual", implemented: true },
+          { path: "/finance/stocks/nm", label: "NM", implemented: true },
+        ],
+      },
       { path: "/finance/bank", label: "Bank", implemented: true },
     ],
   },
@@ -29,8 +40,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: "/settings", label: "Settings", implemented: true, bottom: true },
 ];
 
-// The tree flattened (parents then children) — for route generation.
-export const ALL_NAV_ITEMS: NavItem[] = NAV_ITEMS.flatMap((item) => [
-  item,
-  ...(item.children ?? []),
-]);
+// The tree flattened (parents then descendants, any depth) — for route generation.
+const flatten = (items: NavItem[]): NavItem[] =>
+  items.flatMap((item) => [item, ...flatten(item.children ?? [])]);
+export const ALL_NAV_ITEMS: NavItem[] = flatten(NAV_ITEMS);

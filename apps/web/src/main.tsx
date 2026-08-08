@@ -15,7 +15,7 @@ import { Placeholder } from "./pages/Placeholder";
 import { PlaidLink } from "./pages/PlaidLink";
 import { Reading } from "./pages/Reading";
 import { Settings } from "./pages/Settings";
-import { Stocks } from "./pages/Stocks";
+import { Stocks, StocksIndexRedirect } from "./pages/Stocks";
 import { Todos } from "./pages/Todos";
 // Selectable fonts (Settings > Style), bundled locally — no CDN.
 import "@fontsource-variable/inter";
@@ -38,7 +38,9 @@ createRoot(document.getElementById("root")!).render(
               <Route path="todos" element={<Todos />} />
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="finance" element={<Finance />} />
-              <Route path="finance/stocks" element={<Stocks />} />
+              {/* Bare stocks URL lands on the last-viewed account tab. */}
+              <Route path="finance/stocks" element={<StocksIndexRedirect />} />
+              <Route path="finance/stocks/:account" element={<Stocks />} />
               <Route path="finance/bank" element={<Bank />} />
               <Route path="exercise" element={<Exercise />} />
               <Route path="reading" element={<Reading />} />

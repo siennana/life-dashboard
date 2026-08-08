@@ -13,7 +13,13 @@ export default function App() {
       {/* Loads the stored font/theme and stamps them on <html>. */}
       <ApplyUiSettings />
       <SideNav />
-      <main className="flex-1 overflow-y-auto">
+      {/* min-w-0: a flex item defaults to min-width:auto, which lets a wide
+          child (e.g. an overflow-x scroller) push main past the viewport and
+          give it a horizontal scrollbar. min-w-0 lets main shrink so inner
+          scroll containers handle their own overflow. overflow-x-clip trims
+          full-bleed breakouts (the Stocks tab bar's edge-to-edge border) at
+          main's edges instead of growing a horizontal scrollbar. */}
+      <main className="min-w-0 flex-1 overflow-y-auto overflow-x-clip">
         <MobileHeader />
         {/* Padding lives here (not on <main>) so the sticky header spans the
             full width and sits flush at the top of the scroll container. */}

@@ -1,7 +1,8 @@
 import { and, asc, eq, sql } from "drizzle-orm";
-import type { PortfolioResponse, PortfolioRisk, Position, RiskTier, SectorSlice } from "@life/shared";
+import type { PortfolioResponse, PortfolioRisk, Position, RiskTier, SectorSlice, StockAccount } from "@life/shared";
 import { events, metrics, syncRuns, type Db } from "@life/db";
 import { getHoldings } from "./connectors/fidelity";
+import { getNmHoldings } from "./connectors/plaid";
 import { fetchQuotes } from "./connectors/finnhub";
 import { fetchSymbolStats } from "./connectors/yahoo";
 
@@ -112,29 +113,72 @@ function assessRisk(positions: Position[]): PortfolioRisk {
   };
 }
 
+// A holding as the pricing pipeline sees it, whatever account it came from.
+// `institutionPrice` (NM only) is the custodian's own last price — the
+// fallback for securities the quote providers can't price.
+type AccountHolding = {
+  symbol: string;
+  description: string | null;
+  quantity: number | null;
+  costBasis: number | null;
+  institutionPrice?: number | null;
+  // False = `symbol` is a display fallback (NM cash / annuity sub-funds), not
+  // a real ticker — skip the quote providers. Absent (Fidelity) = quotable.
+  quotable?: boolean;
+};
+
+// Real-looking tickers only, and never display-fallback symbols — NM's cash
+// sweep is labeled "CASH", which is also a real NASDAQ ticker (Pathward).
+const quotableSymbols = (holdings: AccountHolding[]) =>
+  holdings
+    .filter((h) => (h.quotable ?? true) && TICKER_RE.test(h.symbol))
+    .map((h) => h.symbol);
+
+// Per-account wiring: where holdings come from and which `metrics`/`events`
+// source the value history + holdingsAsOf live under. "individual" keeps the
+// original "fidelity" source so its accumulated history is untouched.
+const ACCOUNTS: Record<
+  StockAccount,
+  { source: string; loadHoldings: (db: Db) => Promise<AccountHolding[]> }
+> = {
+  individual: { source: "fidelity", loadHoldings: getHoldings },
+  nm: { source: "nm", loadHoldings: getNmHoldings },
+};
+
+// Only real-looking tickers go to Finnhub/Yahoo — NM annuity sub-funds get a
+// name-derived display symbol (spaces etc.) that would just 404/403 there.
+const TICKER_RE = /^[A-Z0-9.\-]{1,12}$/;
+
+export function loadAccountHoldings(db: Db, account: StockAccount) {
+  return ACCOUNTS[account].loadHoldings(db);
+}
+
 // Combine stored holdings with live quotes + beta into the dashboard payload.
 // Without a Finnhub key we still return holdings (cost basis, quantity) but no
 // prices, and risk can't be assessed without market values.
 export async function buildPortfolio(
   db: Db,
   finnhubApiKey: string | undefined,
+  account: StockAccount = "individual",
+  linked = true,
 ): Promise<PortfolioResponse> {
-  const holdings = await getHoldings(db);
+  const holdings = linked ? await loadAccountHoldings(db, account) : [];
   const quotesConfigured = Boolean(finnhubApiKey);
-  const symbols = holdings.map((h) => h.symbol);
+  const symbols = quotableSymbols(holdings);
 
   const [quotes, stats] = await Promise.all([
-    finnhubApiKey && holdings.length > 0
+    finnhubApiKey && symbols.length > 0
       ? fetchQuotes(symbols, finnhubApiKey)
       : Promise.resolve(new Map()),
-    holdings.length > 0
+    symbols.length > 0
       ? fetchSymbolStats(symbols)
       : Promise.resolve(new Map<string, never>()),
   ]);
 
   const positions: Position[] = holdings.map((h) => {
-    const quote = quotes.get(h.symbol) ?? null;
-    const price = quote?.price ?? null;
+    const quotable = h.quotable ?? true;
+    const quote = quotable ? (quotes.get(h.symbol) ?? null) : null;
+    const price = quote?.price ?? h.institutionPrice ?? null;
     const previousClose = quote?.previousClose ?? null;
     const marketValue = h.quantity != null && price != null ? h.quantity * price : null;
     const totalGain =
@@ -145,7 +189,7 @@ export async function buildPortfolio(
       h.quantity != null && price != null && previousClose != null
         ? h.quantity * (price - previousClose)
         : null;
-    const s = stats.get(h.symbol) ?? null;
+    const s = quotable ? (stats.get(h.symbol) ?? null) : null;
     const beta = s?.beta ?? null;
     const low = s?.fiftyTwoWeekLow ?? null;
     const high = s?.fiftyTwoWeekHigh ?? null;
@@ -199,7 +243,8 @@ export async function buildPortfolio(
     }
   }
 
-  await recordPortfolioValue(db, marketValue, positions.length);
+  const source = ACCOUNTS[account].source;
+  await recordPortfolioValue(db, source, marketValue, positions.length);
 
   return {
     positions: positions.sort((a, b) => (b.marketValue ?? 0) - (a.marketValue ?? 0)),
@@ -212,11 +257,13 @@ export async function buildPortfolio(
       dayGainPct,
     },
     sectors: sectorBreakdown(positions),
-    history: await loadHistory(db),
+    history: await loadHistory(db, source),
     risk: assessRisk(positions),
     pricedAt: quotesConfigured && holdings.length > 0 ? new Date().toISOString() : null,
-    holdingsAsOf: await loadHoldingsAsOf(db),
+    holdingsAsOf: await loadHoldingsAsOf(db, source),
     quotesConfigured,
+    account,
+    linked,
   };
 }
 
@@ -240,26 +287,29 @@ async function recordProviderRun(db: Db, source: string, fn: () => Promise<unkno
 
 // Scheduled market-data snapshot: contacts Finnhub (quotes) and Yahoo (stats),
 // recording a sync_run per provider so each is its own row in the Sync status
-// widget, then prices the portfolio + upserts today's value snapshot.
-// buildPortfolio reuses the just-warmed 45s/12h caches, so the providers are hit
-// once per cycle, not twice. Only the 5-min loop calls this; page loads call
-// buildPortfolio directly and don't record runs.
-export async function syncPortfolioSnapshot(db: Db, finnhubApiKey: string) {
-  const symbols = (await getHoldings(db)).map((h) => h.symbol);
+// widget, then prices each account's portfolio + upserts today's value
+// snapshots. buildPortfolio reuses the just-warmed 45s/12h caches, so the
+// providers are hit once per cycle, not once per account. Only the 5-min loop
+// calls this; page loads call buildPortfolio directly and don't record runs.
+export async function syncPortfolioSnapshot(db: Db, finnhubApiKey: string, nmLinked: boolean) {
+  const accounts: StockAccount[] = nmLinked ? ["individual", "nm"] : ["individual"];
+  const holdingLists = await Promise.all(accounts.map((a) => loadAccountHoldings(db, a)));
+  const symbols = [...new Set(quotableSymbols(holdingLists.flat()))];
   await Promise.all([
     recordProviderRun(db, "finnhub", () => fetchQuotes(symbols, finnhubApiKey)),
     recordProviderRun(db, "yahoo", () => fetchSymbolStats(symbols)),
   ]);
-  await buildPortfolio(db, finnhubApiKey);
+  for (const account of accounts) await buildPortfolio(db, finnhubApiKey, account);
 }
 
-// The CSV import stamps startTs = upload time on every holding row, so the
-// newest startTs is when the portfolio was last uploaded.
-async function loadHoldingsAsOf(db: Db): Promise<string | null> {
+// When the holdings were last replaced: the Fidelity CSV import and the NM
+// sync both stamp startTs = run time on every holding row, so the newest
+// startTs is the last upload/sync for that account's source.
+async function loadHoldingsAsOf(db: Db, source: string): Promise<string | null> {
   const [row] = await db
     .select({ ts: sql<Date | null>`max(${events.startTs})` })
     .from(events)
-    .where(and(eq(events.source, "fidelity"), eq(events.type, "holding")));
+    .where(and(eq(events.source, source), eq(events.type, "holding")));
   return row?.ts ? new Date(row.ts).toISOString() : null;
 }
 
@@ -287,11 +337,16 @@ function sectorBreakdown(positions: Position[]): SectorSlice[] {
     .sort((a, b) => b.value - a.value);
 }
 
-// Daily portfolio-value snapshot: one metrics row per calendar day, last write
-// of the day wins. This series can't be backfilled — record it on every priced
-// build (page loads and the 5-min sync loop). A failed snapshot must never
-// break the portfolio response.
-async function recordPortfolioValue(db: Db, marketValue: number | null, holdingCount: number) {
+// Daily portfolio-value snapshot: one metrics row per calendar day per account
+// source, last write of the day wins. This series can't be backfilled — record
+// it on every priced build (page loads and the 5-min sync loop). A failed
+// snapshot must never break the portfolio response.
+async function recordPortfolioValue(
+  db: Db,
+  source: string,
+  marketValue: number | null,
+  holdingCount: number,
+) {
   if (marketValue == null) return;
   const today = new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
   const value = marketValue.toFixed(2);
@@ -303,7 +358,7 @@ async function recordPortfolioValue(db: Db, marketValue: number | null, holdingC
     await db
       .insert(metrics)
       .values({
-        source: "fidelity",
+        source,
         name: "portfolio_value",
         value,
         unit: "usd",
@@ -321,11 +376,12 @@ async function recordPortfolioValue(db: Db, marketValue: number | null, holdingC
 
 async function loadHistory(
   db: Db,
+  source: string,
 ): Promise<{ date: string; value: number; capturedAt: string | null; backfilled: boolean }[]> {
   const rows = await db
     .select({ date: metrics.date, value: metrics.value, payload: metrics.payload })
     .from(metrics)
-    .where(and(eq(metrics.source, "fidelity"), eq(metrics.name, "portfolio_value")))
+    .where(and(eq(metrics.source, source), eq(metrics.name, "portfolio_value")))
     .orderBy(asc(metrics.date));
   return rows.map((r) => {
     const p = (r.payload ?? {}) as { capturedAt?: string; backfilled?: boolean };

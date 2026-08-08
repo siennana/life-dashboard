@@ -16,6 +16,7 @@ import { buildDailyCashflow, buildDayTransactions, buildSpendingDashboard } from
 import {
   createLinkToken,
   exchangePublicToken,
+  syncNmHoldings,
   syncPlaid,
   type PlaidCreds,
 } from "./connectors/plaid";
@@ -25,7 +26,9 @@ import {
   exerciseInputSchema,
   periodToggleInputSchema,
   plaidExchangeInputSchema,
+  plaidLinkTokenInputSchema,
   saveDayLogInputSchema,
+  stockAccountSchema,
   uiSettingsSchema,
   type SyncProcess,
   type SyncProcessStatus,
@@ -96,6 +99,7 @@ function processDefs(): ProcessDef[] {
     { key: "todoist", label: "Todoist", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.todoistApiToken) },
     { key: "calendar", label: "CalDAV", type: "CalDAV", cadence: CADENCE_INTERVAL, configured: Boolean(config.icloudEmail && config.icloudAppPassword) },
     { key: "plaid", label: "Plaid", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidAccessToken) },
+    { key: "nm", label: "Northwestern Mutual", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidNmAccessToken) },
     // Both hit only by the market snapshot, which is gated on the Finnhub key.
     { key: "finnhub", label: "Finnhub", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
     { key: "yahoo", label: "Yahoo Finance", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
@@ -207,9 +211,16 @@ app.post("/api/finance/holdings/upload", async (req, reply) => {
 });
 
 // Finance: stored holdings priced with live quotes (cached ~45s).
-app.get("/api/finance/portfolio", async (_req, reply) => {
+// ?account=individual (default, Fidelity CSV) | nm (Northwestern Mutual via
+// Plaid Investments). For an unlinked NM the response is empty with
+// linked:false — the tab renders the Plaid link CTA off that.
+app.get("/api/finance/portfolio", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
-  return buildPortfolio(db, config.finnhubApiKey);
+  const parsed = stockAccountSchema.safeParse((req.query as { account?: string }).account ?? "individual");
+  if (!parsed.success) return reply.code(400).send({ error: "invalid account - expected individual | nm" });
+  const account = parsed.data;
+  const linked = account === "nm" ? Boolean(plaidCreds() && config.plaidNmAccessToken) : true;
+  return buildPortfolio(db, config.finnhubApiKey, account, linked);
 });
 
 // Weather: live 7-day forecast from Open-Meteo for the configured location.
@@ -239,12 +250,13 @@ function plaidCreds(): PlaidCreds | null {
 
 // Plaid one-time linking: mint a Link token, then exchange the public token
 // Link hands back. The resulting access token gets pasted into .env.
-app.post("/api/plaid/link-token", async (_req, reply) => {
+app.post("/api/plaid/link-token", async (req, reply) => {
   const creds = plaidCreds();
   if (!creds) {
     return reply.code(503).send({ error: "PLAID_CLIENT_ID / PLAID_SECRET not configured" });
   }
-  return createLinkToken(creds);
+  const { mode } = plaidLinkTokenInputSchema.parse(req.body ?? {});
+  return createLinkToken(creds, mode);
 });
 
 app.post("/api/plaid/exchange", async (req, reply) => {
@@ -406,7 +418,7 @@ app.delete("/api/books/:id", async (req, reply) => {
 });
 
 // The connectors that can be synced on demand, keyed by their sync_runs source.
-const SYNCABLE_SOURCES = ["todoist", "calendar", "plaid"] as const;
+const SYNCABLE_SOURCES = ["todoist", "calendar", "plaid", "nm"] as const;
 type SyncableSource = (typeof SYNCABLE_SOURCES)[number];
 
 // Run one connector by its source key. Returns the connector's own result, or a
@@ -426,6 +438,12 @@ function runConnector(activeDb: NonNullable<typeof db>, source: SyncableSource):
       const creds = plaidCreds();
       return creds && config.plaidAccessToken
         ? syncPlaid(activeDb, creds, config.plaidAccessToken)
+        : Promise.resolve({ skipped: "not configured" });
+    }
+    case "nm": {
+      const creds = plaidCreds();
+      return creds && config.plaidNmAccessToken
+        ? syncNmHoldings(activeDb, creds, config.plaidNmAccessToken)
         : Promise.resolve({ skipped: "not configured" });
     }
   }
@@ -513,12 +531,22 @@ async function runSyncs() {
         app.log.error({ err }, "plaid sync failed");
       }
     }
-    // Market data: price the portfolio + upsert today's value snapshot, and
-    // record a sync_run under "market" so it shows in the status widget. The
+    // NM holdings before the market snapshot, so the snapshot prices fresh
+    // positions.
+    const nmLinked = Boolean(creds && config.plaidNmAccessToken);
+    if (creds && config.plaidNmAccessToken) {
+      try {
+        await syncNmHoldings(activeDb, creds, config.plaidNmAccessToken);
+      } catch (err) {
+        app.log.error({ err }, "nm holdings sync failed");
+      }
+    }
+    // Market data: price each account's portfolio + upsert today's value
+    // snapshots, recording a sync_run per provider for the status widget. The
     // metrics series accumulates even on days the Stocks page is never opened.
     if (config.finnhubApiKey) {
       try {
-        await syncPortfolioSnapshot(activeDb, config.finnhubApiKey);
+        await syncPortfolioSnapshot(activeDb, config.finnhubApiKey, nmLinked);
       } catch (err) {
         app.log.error({ err }, "market snapshot failed");
       }

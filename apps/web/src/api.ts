@@ -13,9 +13,11 @@ import type {
   PeriodsResponse,
   PeriodToggleInput,
   PeriodToggleResult,
+  PlaidLinkMode,
   PortfolioResponse,
   SpendingDashboard,
   StatusResponse,
+  StockAccount,
   UiSettings,
   UploadResponse,
   WeatherResponse,
@@ -100,7 +102,8 @@ export async function syncSource(source: string): Promise<void> {
   if (!res.ok) throw new Error(await errorMessage(res));
 }
 
-export const getPortfolio = () => apiFetch<PortfolioResponse>("/api/finance/portfolio");
+export const getPortfolio = (account: StockAccount = "individual") =>
+  apiFetch<PortfolioResponse>(`/api/finance/portfolio?account=${account}`);
 
 export async function uploadHoldings(csv: string): Promise<UploadResponse> {
   const res = await fetch("/api/finance/holdings/upload", {
@@ -236,8 +239,8 @@ async function apiPost<T>(path: string, body: object): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const createPlaidLinkToken = () =>
-  apiPost<{ link_token: string }>("/api/plaid/link-token", {});
+export const createPlaidLinkToken = (mode: PlaidLinkMode = "transactions") =>
+  apiPost<{ link_token: string }>("/api/plaid/link-token", { mode });
 
 export const exchangePlaidToken = (publicToken: string) =>
   apiPost<{ access_token: string; item_id: string }>("/api/plaid/exchange", {

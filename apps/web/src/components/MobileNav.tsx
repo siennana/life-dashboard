@@ -24,6 +24,23 @@ function MenuRow({ item }: { item: NavItem }) {
   );
 }
 
+// Recursive branch: a row plus (when present) its indented children — same
+// indent-guide styling as the desktop sidebar tree, any depth.
+function MenuBranch({ item }: { item: NavItem }) {
+  return (
+    <li>
+      <MenuRow item={item} />
+      {item.children && (
+        <ul className="ml-5 space-y-1 border-l border-zinc-700/70 pl-2">
+          {item.children.map((child) => (
+            <MenuBranch key={child.path} item={child} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
 export function MobileNavMenu() {
   const mainItems = NAV_ITEMS.filter((i) => !i.bottom);
   const bottomItems = NAV_ITEMS.filter((i) => i.bottom);
@@ -33,19 +50,7 @@ export function MobileNavMenu() {
       <h1 className="px-3 text-lg font-semibold text-zinc-100">Life Dashboard</h1>
       <ul className="mt-4 space-y-1">
         {mainItems.map((item) => (
-          <li key={item.path}>
-            <MenuRow item={item} />
-            {item.children && (
-              // Same indent-guide styling as the desktop sidebar tree.
-              <ul className="ml-5 space-y-1 border-l border-zinc-700/70 pl-2">
-                {item.children.map((child) => (
-                  <li key={child.path}>
-                    <MenuRow item={child} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
+          <MenuBranch key={item.path} item={item} />
         ))}
       </ul>
       <ul className="mt-4 space-y-1 border-t border-zinc-800 pt-3">
@@ -59,16 +64,22 @@ export function MobileNavMenu() {
   );
 }
 
-// Breadcrumb trail for the current page, derived from the nav tree so
-// subfolder pages (Finance > Stocks/Bank) come out as two crumbs. Pages not
-// in the tree (e.g. /plaid-link) fall back to a prettified path segment.
-function findCrumbs(pathname: string): { path: string; label: string }[] {
-  for (const item of NAV_ITEMS) {
-    for (const child of item.children ?? []) {
-      if (pathname.startsWith(child.path)) return [item, child];
-    }
+// Breadcrumb trail for the current page, derived from the nav tree — deepest
+// match wins, so nested pages (Finance > Stocks > NM) come out as one crumb
+// per level. Pages not in the tree (e.g. /plaid-link) fall back to a
+// prettified path segment.
+function findTrail(items: NavItem[], pathname: string): NavItem[] | null {
+  for (const item of items) {
+    const childTrail = item.children ? findTrail(item.children, pathname) : null;
+    if (childTrail) return [item, ...childTrail];
     if (pathname.startsWith(item.path)) return [item];
   }
+  return null;
+}
+
+function findCrumbs(pathname: string): { path: string; label: string }[] {
+  const trail = findTrail(NAV_ITEMS, pathname);
+  if (trail) return trail;
   const seg = pathname.split("/")[1] ?? "";
   const label = seg ? seg[0].toUpperCase() + seg.slice(1).replace(/-/g, " ") : "";
   return [{ path: pathname, label }];

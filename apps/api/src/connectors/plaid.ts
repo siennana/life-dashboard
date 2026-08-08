@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { events, syncRuns, type Db } from "@life/db";
 
 // Bank spending via Plaid, read-only. Transactions normalize into `events`
@@ -25,16 +25,18 @@ async function plaidPost<T>(creds: PlaidCreds, path: string, body: object): Prom
   return res.json() as Promise<T>;
 }
 
-// One-time browser handshake, step 1: a short-lived token that opens Plaid Link.
-export function createLinkToken(creds: PlaidCreds) {
+// One-time browser handshake, step 1: a short-lived token that opens Plaid
+// Link. "transactions" = the bank item; "investments" = the NM brokerage item
+// (holdings only — a separate Plaid item with its own access token).
+export function createLinkToken(creds: PlaidCreds, mode: "transactions" | "investments" = "transactions") {
   return plaidPost<{ link_token: string }>(creds, "/link/token/create", {
     client_name: "Life Dashboard",
     // Stable opaque id for Plaid's records - single-user app, so a constant.
     user: { client_user_id: "life-dashboard-user" },
-    products: ["transactions"],
+    products: [mode],
     // Max history Plaid allows. Only takes effect at link time, so getting more
     // than the 90-day default on an existing item means re-linking the bank.
-    transactions: { days_requested: 730 },
+    ...(mode === "transactions" ? { transactions: { days_requested: 730 } } : {}),
     country_codes: ["US"],
     language: "en",
   });
@@ -152,6 +154,162 @@ async function syncAccounts(db: Db, creds: PlaidCreds, accessToken: string) {
       });
   }
   return accounts.length;
+}
+
+// ---- Northwestern Mutual investments (second Plaid item, source "nm") -------
+// Holdings only, via /investments/holdings/get (no incremental sync — Plaid
+// returns the full current position list every call, so each run replaces).
+// Rows land in `events` (source "nm", type "holding", externalId =
+// security_id — the stable key; tickers can be null for annuity sub-funds).
+
+type PlaidInvestmentHolding = {
+  account_id: string;
+  security_id: string;
+  quantity: number;
+  institution_price?: number | null;
+  institution_value?: number | null;
+  cost_basis?: number | null;
+  iso_currency_code?: string | null;
+};
+
+type PlaidSecurity = {
+  security_id: string;
+  ticker_symbol?: string | null;
+  name?: string | null;
+  type?: string | null; // equity | etf | mutual fund | cash | fixed income | ...
+  close_price?: number | null;
+};
+
+export type NmHolding = {
+  symbol: string;
+  description: string | null;
+  quantity: number | null;
+  costBasis: number | null;
+  // Custodian's own last price — the pricing fallback for securities Finnhub
+  // can't quote (annuity sub-funds, mutual funds on the free tier).
+  institutionPrice: number | null;
+  // False when `symbol` is a display fallback, not a real exchange ticker —
+  // those must never hit the quote providers. Learned the hard way: the cash
+  // sweep's fallback symbol "CASH" is also Pathward Financial's real NASDAQ
+  // ticker, which priced dollars at ~$87/share.
+  quotable: boolean;
+};
+
+const TICKER_RE = /^[A-Z0-9.\-]{1,12}$/;
+
+// Display symbol for a security: real ticker when it has one (quotable), else
+// "CASH" for cash sweeps / the uppercased name head for annuity sub-funds —
+// display-only fallbacks (quotable: false), priced via institution_price.
+function nmSymbol(s: PlaidSecurity | undefined): { symbol: string; quotable: boolean } {
+  const ticker = s?.ticker_symbol?.trim().toUpperCase() ?? "";
+  if (s?.type !== "cash" && TICKER_RE.test(ticker)) return { symbol: ticker, quotable: true };
+  if (s?.type === "cash") return { symbol: "CASH", quotable: false };
+  return {
+    symbol: (s?.name ?? s?.security_id ?? "UNKNOWN").toUpperCase().slice(0, 14).trim(),
+    quotable: false,
+  };
+}
+
+export async function syncNmHoldings(db: Db, creds: PlaidCreds, accessToken: string) {
+  const run = (await db.insert(syncRuns).values({ source: "nm" }).returning())[0]!;
+  try {
+    const { holdings, securities } = await plaidPost<{
+      holdings: PlaidInvestmentHolding[];
+      securities: PlaidSecurity[];
+    }>(creds, "/investments/holdings/get", { access_token: accessToken });
+    const securityById = new Map(securities.map((s) => [s.security_id, s]));
+
+    // The same security can sit in several sub-accounts of the item — the
+    // dashboard is per-position, so aggregate by security.
+    const bySecurity = new Map<string, PlaidInvestmentHolding[]>();
+    for (const h of holdings) {
+      const list = bySecurity.get(h.security_id) ?? [];
+      list.push(h);
+      bySecurity.set(h.security_id, list);
+    }
+
+    const now = new Date();
+    for (const [securityId, rows] of bySecurity) {
+      const s = securityById.get(securityId);
+      const sumOf = (pick: (h: PlaidInvestmentHolding) => number | null | undefined) => {
+        const present = rows.map(pick).filter((v): v is number => v != null);
+        return present.length ? present.reduce((a, b) => a + b, 0) : null;
+      };
+      const { symbol, quotable } = nmSymbol(s);
+      const payload: NmHolding & { securityType: string | null; currency: string } = {
+        symbol,
+        quotable,
+        description: s?.name ?? null,
+        quantity: sumOf((h) => h.quantity),
+        costBasis: sumOf((h) => h.cost_basis),
+        institutionPrice: rows[0]?.institution_price ?? s?.close_price ?? null,
+        securityType: s?.type ?? null,
+        currency: rows[0]?.iso_currency_code ?? "USD",
+      };
+      await db
+        .insert(events)
+        .values({
+          source: "nm",
+          externalId: securityId,
+          type: "holding",
+          title: payload.description ?? payload.symbol,
+          startTs: now,
+          payload,
+        })
+        .onConflictDoUpdate({
+          target: [events.source, events.externalId],
+          set: { title: payload.description ?? payload.symbol, startTs: now, payload, updatedAt: now },
+        });
+    }
+
+    // A security missing from this pull was sold — remove it (same replace
+    // semantics as the Fidelity CSV upload).
+    const keep = [...bySecurity.keys()];
+    if (keep.length > 0) {
+      await db
+        .delete(events)
+        .where(
+          and(
+            eq(events.source, "nm"),
+            eq(events.type, "holding"),
+            notInArray(events.externalId, keep),
+          ),
+        );
+    }
+
+    await db
+      .update(syncRuns)
+      .set({ finishedAt: new Date(), status: "ok" })
+      .where(eq(syncRuns.id, run.id));
+    return { ok: true, holdings: bySecurity.size };
+  } catch (err) {
+    await db
+      .update(syncRuns)
+      .set({ finishedAt: new Date(), status: "error", error: String(err) })
+      .where(eq(syncRuns.id, run.id));
+    throw err;
+  }
+}
+
+// Read stored NM holdings back out for pricing/display (finance.ts).
+export async function getNmHoldings(db: Db): Promise<NmHolding[]> {
+  const rows = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.source, "nm"), eq(events.type, "holding")));
+  return rows.map((r) => {
+    const p = (r.payload ?? {}) as Partial<NmHolding>;
+    return {
+      symbol: p.symbol ?? r.externalId,
+      description: p.description ?? r.title,
+      quantity: p.quantity ?? null,
+      costBasis: p.costBasis ?? null,
+      institutionPrice: p.institutionPrice ?? null,
+      // Strict === true: rows written before this flag existed stay unquoted
+      // (institution-priced) until the next sync rewrites their payload.
+      quotable: p.quotable === true,
+    };
+  });
 }
 
 // A fresh cursor means a fresh Plaid item (first link OR a re-link, e.g. to

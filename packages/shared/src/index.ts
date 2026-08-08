@@ -30,6 +30,12 @@ export const statusResponseSchema = z.object({
 });
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 
+// Which stock account a portfolio request/response is about: "individual" =
+// the Fidelity CSV upload, "nm" = Northwestern Mutual via Plaid Investments.
+export const STOCK_ACCOUNTS = ["individual", "nm"] as const;
+export const stockAccountSchema = z.enum(STOCK_ACCOUNTS);
+export type StockAccount = z.infer<typeof stockAccountSchema>;
+
 // Risk tiers derived from a holding's beta (volatility vs. the market).
 // "unknown" = no beta available (e.g. money-market / some funds).
 export const RISK_TIERS = ["low", "moderate", "elevated", "high", "unknown"] as const;
@@ -109,9 +115,15 @@ export const portfolioResponseSchema = z.object({
   ),
   risk: portfolioRiskSchema,
   pricedAt: z.string().nullable(),
-  // When the holdings themselves were last replaced (= last CSV upload).
+  // When the holdings themselves were last replaced (= last CSV upload for
+  // "individual", last Plaid holdings sync for "nm").
   holdingsAsOf: z.string().nullable(),
   quotesConfigured: z.boolean(),
+  account: stockAccountSchema,
+  // False only for "nm" before its Plaid item is connected (no
+  // PLAID_NM_ACCESS_TOKEN) — the UI shows the link CTA instead of the empty
+  // dashboard. "individual" is CSV-based, so it's always true there.
+  linked: z.boolean(),
 });
 export type PortfolioResponse = z.infer<typeof portfolioResponseSchema>;
 
@@ -275,6 +287,13 @@ export const plaidExchangeInputSchema = z.object({
   public_token: z.string().min(10),
 });
 export type PlaidExchangeInput = z.infer<typeof plaidExchangeInputSchema>;
+
+// Which Plaid product set to request at link time: "transactions" = the bank
+// item (spending), "investments" = the NM brokerage item (stock holdings).
+export const plaidLinkTokenInputSchema = z.object({
+  mode: z.enum(["transactions", "investments"]).default("transactions"),
+});
+export type PlaidLinkMode = z.infer<typeof plaidLinkTokenInputSchema>["mode"];
 
 export const spendingTransactionSchema = z.object({
   id: z.number(),

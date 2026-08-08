@@ -25,6 +25,10 @@ const envSchema = z.object({
   PLAID_SECRET: z.string().optional(),
   PLAID_ENV: z.enum(["sandbox", "production"]).default("production"),
   PLAID_ACCESS_TOKEN: z.string().optional(),
+  // Second Plaid item: Northwestern Mutual, linked with the investments
+  // product (holdings for the Stocks page's NM tab). Optional — the NM tab
+  // shows a link CTA until it's set.
+  PLAID_NM_ACCESS_TOKEN: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -78,5 +82,6 @@ export const config = {
   plaidSecret: env.PLAID_SECRET,
   plaidEnv: env.PLAID_ENV,
   plaidAccessToken: env.PLAID_ACCESS_TOKEN,
+  plaidNmAccessToken: env.PLAID_NM_ACCESS_TOKEN,
   warnings,
 };

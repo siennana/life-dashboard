@@ -34,11 +34,19 @@ const rowClass = (active: boolean) =>
     active ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
   }`;
 
-// A top-level entry; ones with children get a chevron that expands a nested
-// list. The section auto-opens while any of its child routes is active.
+// Deep check: is the current path inside this item's subtree?
+function inSubtree(item: NavItem, pathname: string): boolean {
+  return (item.children ?? []).some(
+    (c) => pathname.startsWith(c.path) || inSubtree(c, pathname),
+  );
+}
+
+// One tree entry at any depth; ones with children get a chevron that expands a
+// nested list (recursively — Finance > Stocks > Individual/NM). A section
+// auto-opens while any route in its subtree is active.
 function NavEntry({ item }: { item: NavItem }) {
   const location = useLocation();
-  const childActive = (item.children ?? []).some((c) => location.pathname.startsWith(c.path));
+  const childActive = inSubtree(item, location.pathname);
   const [manuallyOpen, setManuallyOpen] = useState(false);
   const open = manuallyOpen || childActive;
 
@@ -77,14 +85,11 @@ function NavEntry({ item }: { item: NavItem }) {
       </div>
       {open && (
         // Indent guide: the vertical line down the left of the children, aligned
-        // under the parent's chevron.
+        // under the parent's chevron. Children recurse, so a child with its own
+        // children (Stocks) gets a chevron + nested list of its own.
         <ul className="mt-0.5 ml-[0.9rem] space-y-0.5 border-l border-zinc-700/70 pl-2">
           {item.children.map((child) => (
-            <li key={child.path}>
-              <NavLink to={child.path} className={({ isActive }) => rowClass(isActive)}>
-                <span className="truncate">{child.label}</span>
-              </NavLink>
-            </li>
+            <NavEntry key={child.path} item={child} />
           ))}
         </ul>
       )}
