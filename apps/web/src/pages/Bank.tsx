@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { SpendingDashboard } from "@life/shared";
 import { getSpending } from "../api";
+import { quietBtnClass } from "../lib/controls";
 import { money } from "../lib/finance";
 
 // Spending dashboard (Plaid). Chart color system: spend is one measure, so
@@ -341,7 +342,7 @@ export function Bank() {
           <button
             onClick={() => older && setMonth(older)}
             disabled={!older}
-            className="rounded-md px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-30 disabled:hover:bg-transparent"
+            className={`${quietBtnClass} disabled:opacity-30 disabled:hover:bg-transparent`}
             aria-label="Earlier month"
           >
             ←
@@ -350,7 +351,7 @@ export function Bank() {
           <button
             onClick={() => newer && setMonth(newer)}
             disabled={!newer}
-            className="rounded-md px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-30 disabled:hover:bg-transparent"
+            className={`${quietBtnClass} disabled:opacity-30 disabled:hover:bg-transparent`}
             aria-label="Later month"
           >
             →

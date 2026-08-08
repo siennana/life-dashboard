@@ -18,7 +18,8 @@ function TodosForDay({ date }: { date: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Todos</span>
-      <div className="min-h-16 flex-1 overflow-y-auto rounded-lg border border-zinc-700 p-2">
+      {/* max-h caps long lists when the column is content-sized (mobile). */}
+      <div className="max-h-56 min-h-16 flex-1 overflow-y-auto rounded-lg border border-zinc-700 p-2 md:max-h-none">
         {due.length === 0 && completed.length === 0 ? (
           <div className="flex h-full min-h-12 items-center justify-center text-[11px] text-zinc-600">
             None due
@@ -65,7 +66,7 @@ function TransactionsForDay({ date }: { date: string }) {
       <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
         Transactions
       </span>
-      <div className="min-h-16 flex-1 overflow-y-auto rounded-lg border border-zinc-700 p-2">
+      <div className="max-h-56 min-h-16 flex-1 overflow-y-auto rounded-lg border border-zinc-700 p-2 md:max-h-none">
         {txs.length === 0 ? (
           <div className="flex h-full min-h-12 items-center justify-center text-[11px] text-zinc-600">
             {q.isPending ? "…" : "None"}
@@ -93,16 +94,19 @@ function TransactionsForDay({ date }: { date: string }) {
 }
 
 // The widened-day form. Left column: log + todos + transactions. Right column:
-// schedule.
+// schedule. On mobile the columns stack (page scrolls) and the schedule gets a
+// fixed height so its timeline still scrolls internally.
 export function DayForm({ date }: { date: string }) {
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-2 gap-2">
+    <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 md:grid-cols-2">
       <div className="flex min-h-0 flex-col gap-2">
         <DayLog date={date} />
         <TodosForDay date={date} />
         <TransactionsForDay date={date} />
       </div>
-      <DaySchedule date={date} />
+      <div className="flex h-96 min-h-0 flex-col md:h-auto">
+        <DaySchedule date={date} />
+      </div>
     </div>
   );
 }

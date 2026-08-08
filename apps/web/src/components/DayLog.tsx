@@ -44,7 +44,9 @@ export function DayLog({ date, showLabel = true }: { date: string; showLabel?: b
         }}
         onBlur={handleBlur}
         placeholder="Notes about the day..."
-        className="min-h-0 flex-1 resize-none rounded-lg border border-zinc-700 bg-zinc-800 p-2 text-xs text-zinc-400 placeholder:text-zinc-500 focus:border-zinc-500 focus:text-zinc-100 focus:outline-none"
+        // min-h-24 keeps the field usable when the column is content-sized
+        // (mobile day view); md+ containers are fixed-height, flex-1 rules.
+        className="min-h-24 flex-1 resize-none rounded-lg border border-zinc-700 bg-zinc-800 p-2 text-xs text-zinc-400 placeholder:text-zinc-500 focus:border-zinc-500 focus:text-zinc-100 focus:outline-none md:min-h-0"
       />
     </div>
   );

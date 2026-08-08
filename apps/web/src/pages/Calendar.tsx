@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCalendarLastUpdated, getCashflow, getWeather, togglePeriodDay } from "../api";
 import type { CashflowDay } from "@life/shared";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
+import { quietBtnClass } from "../lib/controls";
 import { weatherEmoji } from "../lib/weather";
 import { usePeriodDays } from "../lib/period";
+import { useIsMobile } from "../lib/useIsMobile";
 import { DayForm } from "../components/DayForm";
 import { DayLog } from "../components/DayLog";
 import { WeekSchedule } from "../components/WeekSchedule";
@@ -39,8 +41,21 @@ function buildGrid(year: number, month: number): Cell[] {
   return cells;
 }
 
+const cellKey = (c: Cell) => dateKey(c.year, c.month, c.day);
+
+// True when a click landed on an interactive control, so container-level
+// "click empty space to collapse" handlers leave it alone.
+const isControlClick = (e: React.MouseEvent) =>
+  (e.target as HTMLElement).closest("input, textarea, button, select, a") !== null;
+
+// Controls share Bank's quiet-button style (quietBtnClass). Month/year are
+// native <select>s styled to match — the current value reads as the label,
+// and field-sizing trims each to its selected option so the row stays evenly
+// spaced (unsupported browsers just get slack after short month names).
 const selectClass =
-  "rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none";
+  "field-sizing-content appearance-none rounded-md bg-transparent px-2 py-1 text-sm font-medium text-zinc-100 hover:bg-zinc-800 focus:outline-none";
+const arrowClass = quietBtnClass;
+const todayClass = `${quietBtnClass} text-sm`;
 
 // Left gutter (px) reserved for hour labels; the week-scan header/schedule/log
 // bands all offset by it so their day columns line up.
@@ -64,6 +79,17 @@ function dayNumClass(opts: { isPeriod: boolean; isToday: boolean; inMonth: boole
   // Animate width/height/font-size so the circle eases between full and small
   // as its week row expands/compresses (matches the row's flex-grow easing).
   return `inline-flex shrink-0 items-center justify-center rounded-full transition-all duration-300 ${size} ${color}`;
+}
+
+// One unified border around the whole drag range: every selected cell draws
+// the top/bottom edges and the two ends add their outer edge — inset shadows,
+// so the cells' real borders and layout don't shift while dragging.
+const DRAG_EDGE = "rgb(59 130 246 / 0.8)"; // blue-500
+function dragSelShadow(isFirst: boolean, isLast: boolean) {
+  const edges = [`inset 0 2px 0 0 ${DRAG_EDGE}`, `inset 0 -2px 0 0 ${DRAG_EDGE}`];
+  if (isFirst) edges.push(`inset 2px 0 0 0 ${DRAG_EDGE}`);
+  if (isLast) edges.push(`inset -2px 0 0 0 ${DRAG_EDGE}`);
+  return edges.join(", ");
 }
 
 // Compact net-cashflow chip: "-$55" (money out, red) / "+$1,200" (money in,
@@ -90,33 +116,49 @@ function CashflowBadge({ day, covered }: { day: CashflowDay | undefined; covered
 
 export function CalendarPage() {
   const now = new Date();
+  const isMobile = useIsMobile();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
-  // Week row focused via its side tabs; that row grows, the others compress.
+  // The expanded week row; that row grows, the others compress.
   const [expandedWeek, setExpandedWeek] = useState<number | null>(null);
-  // Within the expanded week only: a clicked day widens, its siblings squeeze.
+  // Contiguous drag-selected days within the expanded week. The scan view
+  // shows exactly these days; the row's other cells squeeze aside.
+  const [selection, setSelection] = useState<string[] | null>(null);
+  // A single fully-open day (DayForm); may sit on top of a selection.
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
-  // How the current day was opened, so collapsing knows how far to go back:
-  // "week" → the week was already open, collapse just the day; "month" → the
-  // day was opened straight from the month grid, collapse the week too.
-  const [dayExpandedFrom, setDayExpandedFrom] = useState<"week" | "month" | null>(null);
+  // How the day was opened, so collapsing knows how far back to go:
+  // "selection" → return to the selected-days scan; "month" → all the way out.
+  const [dayExpandedFrom, setDayExpandedFrom] = useState<"selection" | "month" | null>(null);
+  // Live drag range (cell highlighting only; day indices within one week).
+  const [dragSel, setDragSel] = useState<{ week: number; a: number; b: number } | null>(null);
+  const dragRef = useRef<object | null>(null);
+  // Desktop grid container, for collapsing the expansion on outside clicks.
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  // Set while the click that trails a finished drag fires, so it doesn't also
+  // open a day on top of the selection the drag just made.
+  const suppressClickRef = useRef(false);
 
-  function openDay(wi: number, key: string, weekAlreadyOpen: boolean) {
-    if (weekAlreadyOpen) {
-      setExpandedDay(key);
-      setDayExpandedFrom("week");
-    } else {
-      setExpandedWeek(wi);
-      setExpandedDay(key);
-      setDayExpandedFrom("month");
-    }
+  function openDaySingle(wi: number, key: string) {
+    setExpandedWeek(wi);
+    setSelection(null);
+    setExpandedDay(key);
+    setDayExpandedFrom("month");
   }
 
-  // Collapse the open day; also collapse its week if the day came from the
-  // month grid. Called on any click inside an expanded day that isn't on a
-  // control (input/button/etc.).
+  function openDayInSelection(wi: number, key: string) {
+    setExpandedWeek(wi);
+    setExpandedDay(key);
+    setDayExpandedFrom("selection");
+  }
+
+  // Collapse the open day: back to its selection scan if it came from one,
+  // else all the way back to the month grid. Called on any click inside an
+  // expanded day that isn't on a control (input/button/etc.).
   function collapseExpandedDay() {
-    if (dayExpandedFrom === "month") setExpandedWeek(null);
+    if (dayExpandedFrom !== "selection") {
+      setExpandedWeek(null);
+      setSelection(null);
+    }
     setExpandedDay(null);
     setDayExpandedFrom(null);
   }
@@ -124,13 +166,7 @@ export function CalendarPage() {
   // Fully reset expansion (used when the visible month changes).
   function collapseAll() {
     setExpandedWeek(null);
-    setExpandedDay(null);
-    setDayExpandedFrom(null);
-  }
-
-  // Side tab: toggle a whole week open/closed, dropping any focused day.
-  function toggleWeek(wi: number, isOpen: boolean) {
-    setExpandedWeek(isOpen ? null : wi);
+    setSelection(null);
     setExpandedDay(null);
     setDayExpandedFrom(null);
   }
@@ -143,6 +179,14 @@ export function CalendarPage() {
     queryFn: getCalendarLastUpdated,
   });
   const { periodDays } = usePeriodDays();
+  const lastSavedText = lastUpdated.data?.updatedAt
+    ? new Date(lastUpdated.data.updatedAt).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null;
 
   // Right-click context menu for toggling a day as menstruating.
   const [menu, setMenu] = useState<{ x: number; y: number; date: string } | null>(null);
@@ -162,6 +206,20 @@ export function CalendarPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [menu]);
 
+  // Desktop: clicking anywhere outside the calendar grid collapses whatever
+  // is expanded (mobile navigates with breadcrumbs instead). Skipped while
+  // the period context menu is open — its overlay click just closes the menu.
+  useEffect(() => {
+    if (isMobile || expandedWeek === null) return;
+    const onDown = (e: PointerEvent) => {
+      if (menu) return;
+      if (gridRef.current?.contains(e.target as Node)) return;
+      collapseAll();
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [isMobile, expandedWeek, menu]);
+
   function openContextMenu(e: React.MouseEvent, date: string) {
     e.preventDefault();
     const width = 190;
@@ -179,6 +237,112 @@ export function CalendarPage() {
     return Array.from({ length: 6 }, (_, i) => cells.slice(i * 7, i * 7 + 7));
   }, [year, month]);
   const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+
+  function openSelection(wi: number, a: number, b: number) {
+    const keys = weeks[wi].slice(a, b + 1).map(cellKey);
+    setExpandedWeek(wi);
+    setSelection(keys);
+    setExpandedDay(null);
+    setDayExpandedFrom(null);
+  }
+
+  // A plain click/tap on a day cell (also the landing spot for a single-cell
+  // drag). From a selection scan it opens the day on top of the selection;
+  // otherwise it opens the day directly from the month grid.
+  function cellClick(wi: number, key: string) {
+    if (expandedWeek === wi && expandedDay === null && selection) openDayInSelection(wi, key);
+    else if (expandedWeek === wi && expandedDay !== null) setExpandedDay(key);
+    else openDaySingle(wi, key);
+  }
+  function handleCellClick(wi: number, key: string) {
+    if (!suppressClickRef.current) cellClick(wi, key);
+  }
+
+  // Press-drag day selection across a week. Mouse: press and drag. Touch:
+  // long-press (350ms) engages selection first — moving before it fires is a
+  // scroll and cancels. Listeners attach per-gesture on window; the hovered
+  // cell comes from elementFromPoint (not enter events) because touch pointer
+  // events stay captured on the cell where the gesture started.
+  function beginDrag(e: React.PointerEvent, wi: number, di: number) {
+    if (dragRef.current) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const isTouch = e.pointerType !== "mouse";
+    const drag = {
+      startIdx: di,
+      endIdx: di,
+      startX: e.clientX,
+      startY: e.clientY,
+      active: false,
+      timer: 0,
+    };
+    dragRef.current = drag;
+
+    const setRange = () =>
+      setDragSel({
+        week: wi,
+        a: Math.min(drag.startIdx, drag.endIdx),
+        b: Math.max(drag.startIdx, drag.endIdx),
+      });
+    const activate = () => {
+      drag.active = true;
+      document.body.style.userSelect = "none";
+      setRange();
+    };
+    if (isTouch) drag.timer = window.setTimeout(activate, 350);
+
+    const onMove = (ev: PointerEvent) => {
+      if (!drag.active) {
+        const dist = Math.hypot(ev.clientX - drag.startX, ev.clientY - drag.startY);
+        if (isTouch) {
+          // Finger moved before the long-press fired — treat as a scroll.
+          if (dist > 10) cleanup();
+          return;
+        }
+        if (dist <= 6) return;
+        activate();
+      }
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const cell = el?.closest<HTMLElement>("[data-di]");
+      if (!cell || Number(cell.dataset.wi) !== wi) return;
+      const cdi = Number(cell.dataset.di);
+      if (cdi === drag.endIdx) return;
+      drag.endIdx = cdi;
+      setRange();
+    };
+    const onUp = () => {
+      const { active, startIdx, endIdx } = drag;
+      cleanup();
+      if (!active) return; // plain click/tap — the cell's onClick handles it
+      suppressClickRef.current = true;
+      setTimeout(() => (suppressClickRef.current = false), 0);
+      const a = Math.min(startIdx, endIdx);
+      const b = Math.max(startIdx, endIdx);
+      if (a === b) {
+        cellClick(wi, cellKey(weeks[wi][a]));
+      } else {
+        openSelection(wi, a, b);
+      }
+    };
+    // Scroll can only be blocked from a real non-passive touch listener, and
+    // only once selection mode is engaged.
+    const onTouchMove = (ev: TouchEvent) => {
+      if (drag.active) ev.preventDefault();
+    };
+    function cleanup() {
+      window.clearTimeout(drag.timer);
+      document.body.style.userSelect = "";
+      dragRef.current = null;
+      setDragSel(null);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", cleanup);
+      document.removeEventListener("touchmove", onTouchMove);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", cleanup);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+  }
 
   // Forecast high + code by day (today-forward, ~7 days), and the grid row that
   // contains today — weather is shown only on that current-week row.
@@ -205,6 +369,32 @@ export function CalendarPage() {
   const isCashCovered = (key: string) =>
     firstCashDate != null && key >= firstCashDate && key <= todayKey;
 
+  // Day-number circle class with the per-day flags derived in one place.
+  const dayNum = (key: string, inMonth: boolean, small: boolean) =>
+    dayNumClass({ isPeriod: periodDays.has(key), isToday: key === todayKey, inMonth, small });
+
+  // The weather + cashflow badge pair every day header shows. Weather is a
+  // current-week-only forecast, so it needs the day's row index; `dense` is
+  // the compact 10px form for tight columns.
+  const dayBadges = (key: string, wi: number | null, dense = false) => {
+    const wx = wi === currentWeekIndex ? weatherByDay.get(key) : undefined;
+    return (
+      <>
+        {wx && (
+          <span
+            className={`flex shrink-0 items-center text-zinc-400 ${
+              dense ? "gap-0.5 text-[10px]" : "gap-1.5 text-[11px]"
+            }`}
+          >
+            <span className="leading-none">{weatherEmoji(wx.code)}</span>
+            <span className="tabular-nums">{wx.tempMax}°</span>
+          </span>
+        )}
+        <CashflowBadge day={cashflowByDay.get(key)} covered={isCashCovered(key)} />
+      </>
+    );
+  };
+
   // A window of years around now; widens automatically if data falls outside it.
   const years = useMemo(() => {
     const ys = new Set<number>();
@@ -220,24 +410,208 @@ export function CalendarPage() {
     collapseAll();
   }
 
+  // Mobile (below md): no flex-grow compression — month, week, and day are
+  // three views that each fill the whole component, with a breadcrumb row
+  // above the grid to navigate back up. A render function (not a nested
+  // component) so the day form's inputs keep identity across re-renders.
+  function renderMobile() {
+    const week = expandedWeek !== null ? weeks[expandedWeek] : null;
+    // Tap = day view directly; drag-selection = week view over those days.
+    // Day view opened from a selection keeps the selection crumb beneath it.
+    const view = expandedDay !== null ? "day" : week && selection ? "week" : "month";
+    const fmtCell = (c: Cell) =>
+      new Date(c.year, c.month, c.day).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
+    const selCells =
+      week && selection ? week.filter((c) => selection.includes(cellKey(c))) : null;
+    const weekLabel =
+      selCells && selCells.length > 0
+        ? selCells.length === 1
+          ? fmtCell(selCells[0])
+          : `${fmtCell(selCells[0])} – ${fmtCell(selCells[selCells.length - 1])}`
+        : "";
+    let dayLabel = "";
+    if (expandedDay) {
+      const [y, m, d] = expandedDay.split("-").map(Number);
+      dayLabel = new Date(y, m - 1, d).toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      });
+    }
+    const crumbClass = "text-zinc-400 active:text-zinc-200";
+
+    // The expanded day's cell (for the dimmed out-of-month treatment); the day
+    // always belongs to the expanded week, so this only misses if state drifts.
+    const expandedCell = week?.find((c) => cellKey(c) === expandedDay);
+
+    return (
+      <>
+        {view !== "month" && (
+          <nav aria-label="Calendar breadcrumb" className="mt-4 flex items-center gap-2 text-sm">
+            <button type="button" onClick={collapseAll} className={crumbClass}>
+              {MONTHS[month]}
+            </button>
+            <span className="text-zinc-600">/</span>
+            {view === "day" ? (
+              <>
+                {selection && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedDay(null);
+                        setDayExpandedFrom(null);
+                      }}
+                      className={crumbClass}
+                    >
+                      {weekLabel}
+                    </button>
+                    <span className="text-zinc-600">/</span>
+                  </>
+                )}
+                <span className="font-medium text-zinc-100">{dayLabel}</span>
+              </>
+            ) : (
+              <span className="font-medium text-zinc-100">{weekLabel}</span>
+            )}
+          </nav>
+        )}
+
+        {/* Full-bleed: -mx-4 escapes the page's px-4 so the grid spans edge to
+            edge (Apple Calendar style); border-y only, no rounded frame. */}
+        <div className="-mx-4 mt-3 border-y border-zinc-800">
+          {view === "month" && (
+            <>
+              <div className="grid grid-cols-7 border-b border-zinc-800 bg-zinc-900">
+                {WEEKDAYS.map((d) => (
+                  <div
+                    key={d}
+                    className="py-1.5 text-center text-[10px] font-medium uppercase tracking-wide text-zinc-500"
+                  >
+                    {d}
+                  </div>
+                ))}
+              </div>
+              {weeks.map((weekRow, wi) => (
+                <div
+                  key={wi}
+                  className={`grid grid-cols-7 ${wi < 5 ? "border-b border-zinc-800/60" : ""}`}
+                >
+                  {weekRow.map((cell, di) => {
+                    const key = cellKey(cell);
+                    const dayEvents = eventsByDay.get(key) ?? [];
+                    const entries = byDay.get(key) ?? [];
+                    const inDragSel =
+                      dragSel !== null && dragSel.week === wi && di >= dragSel.a && di <= dragSel.b;
+                    return (
+                      <button
+                        type="button"
+                        key={key}
+                        data-wi={wi}
+                        data-di={di}
+                        onPointerDown={(e) => beginDrag(e, wi, di)}
+                        onClick={() => handleCellClick(wi, key)}
+                        aria-label={`Open ${key}`}
+                        style={
+                          dragSel && inDragSel
+                            ? { boxShadow: dragSelShadow(di === dragSel.a, di === dragSel.b) }
+                            : undefined
+                        }
+                        className={`flex h-[4.75rem] min-w-0 select-none flex-col items-center gap-0.5 overflow-hidden border-r border-zinc-800/60 px-0.5 py-1 [-webkit-touch-callout:none] last:border-r-0 ${
+                          cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
+                        }`}
+                      >
+                        <span className={dayNum(key, cell.inMonth, false)}>{cell.day}</span>
+                        {dayBadges(key, wi, true)}
+                        {(dayEvents.length > 0 || entries.length > 0) && (
+                          // Apple-style dots instead of text chips: violet =
+                          // events, blue = exercises (capped, no counts).
+                          <span className="flex shrink-0 items-center gap-0.5">
+                            {dayEvents.slice(0, 3).map((_, i) => (
+                              <span key={`e${i}`} className="h-1 w-1 rounded-full bg-violet-400" />
+                            ))}
+                            {entries.slice(0, 2).map((_, i) => (
+                              <span key={`x${i}`} className="h-1 w-1 rounded-full bg-blue-400" />
+                            ))}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </>
+          )}
+
+          {view === "week" && week && selection && (
+            <div className="flex h-[calc(100dvh-14rem)] min-h-96 flex-col">
+              <div className="flex shrink-0 border-b border-zinc-800/60 bg-zinc-900 py-1">
+                <div style={{ width: SCAN_GUTTER }} className="shrink-0" />
+                {week.map((cell, i) => {
+                  const key = cellKey(cell);
+                  if (!selection.includes(key)) return null;
+                  return (
+                    <button
+                      type="button"
+                      key={key}
+                      onClick={() => {
+                        setExpandedDay(key);
+                        setDayExpandedFrom("selection");
+                      }}
+                      aria-label={`Open ${key}`}
+                      className="flex min-w-0 flex-1 flex-col items-center gap-0.5 overflow-hidden px-0.5 py-0.5"
+                    >
+                      <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+                        {WEEKDAYS[i]}
+                      </span>
+                      <span className={dayNum(key, cell.inMonth, false)}>{cell.day}</span>
+                      {dayBadges(key, expandedWeek, true)}
+                    </button>
+                  );
+                })}
+              </div>
+              <WeekSchedule dates={selection} gutter={SCAN_GUTTER} />
+            </div>
+          )}
+
+          {view === "day" && expandedDay && (
+            <div className="flex flex-col gap-2 p-3">
+              <div className="flex items-center justify-between gap-1">
+                <span className={dayNum(expandedDay, expandedCell?.inMonth ?? true, false)}>
+                  {Number(expandedDay.slice(8))}
+                </span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {dayBadges(expandedDay, expandedWeek, true)}
+                </span>
+              </div>
+              <DayForm date={expandedDay} />
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
-      <div className="mt-6 flex flex-wrap items-center gap-2">
+      {/* "Last saved" pinned top-right; beneath it a single control row — the
+          ← August 2026 → switcher left, Today right — so all buttons align. */}
+      {lastSavedText && (
+        <div className="mt-1 text-right text-xs text-zinc-500 md:mt-6">
+          Last saved {lastSavedText}
+        </div>
+      )}
+      <div className={`${lastSavedText ? "mt-0.5" : "mt-1 md:mt-6"} flex items-center gap-1`}>
         <button
           type="button"
           aria-label="Previous month"
           onClick={() => shiftMonth(-1)}
-          className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700"
+          className={arrowClass}
         >
           ←
-        </button>
-        <button
-          type="button"
-          aria-label="Next month"
-          onClick={() => shiftMonth(1)}
-          className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700"
-        >
-          →
         </button>
         <select
           aria-label="Month"
@@ -269,17 +643,14 @@ export function CalendarPage() {
             </option>
           ))}
         </select>
-        {lastUpdated.data?.updatedAt && (
-          <span className="ml-auto text-xs text-zinc-500">
-            Last saved{" "}
-            {new Date(lastUpdated.data.updatedAt).toLocaleString(undefined, {
-              month: "short",
-              day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
-            })}
-          </span>
-        )}
+        <button
+          type="button"
+          aria-label="Next month"
+          onClick={() => shiftMonth(1)}
+          className={arrowClass}
+        >
+          →
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -287,7 +658,7 @@ export function CalendarPage() {
             setMonth(now.getMonth());
             collapseAll();
           }}
-          className={`${lastUpdated.data?.updatedAt ? "" : "ml-auto"} rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700`}
+          className={`ml-auto ${todayClass}`}
         >
           Today
         </button>
@@ -299,8 +670,10 @@ export function CalendarPage() {
         </p>
       )}
 
-      {/* px-6 leaves a 1.5rem gutter each side for the week tabs to extend into. */}
-      <div className="mt-4 px-6">
+      {isMobile ? (
+        renderMobile()
+      ) : (
+      <div ref={gridRef} className="mt-4">
         <div className="rounded-xl border border-zinc-800">
           <div className="grid grid-cols-7 rounded-t-xl border-b border-zinc-800 bg-zinc-900">
             {WEEKDAYS.map((d) => (
@@ -319,128 +692,123 @@ export function CalendarPage() {
           {weeks.map((week, wi) => {
             const isExpanded = expandedWeek === wi;
             const isCompressed = expandedWeek !== null && !isExpanded;
-            const tabClass = `absolute top-1 bottom-1 w-6 border border-zinc-700 text-xs transition-opacity hover:bg-zinc-700 hover:text-zinc-100 ${
-              isExpanded
-                ? "opacity-100 bg-zinc-700/80 text-zinc-200"
-                : "opacity-0 bg-zinc-800 text-zinc-400 group-hover:opacity-100"
-            }`;
             return (
               <div
                 key={wi}
-                className={`group relative flex min-h-0 basis-0 transition-[flex-grow] duration-300 ${
+                className={`relative flex min-h-0 basis-0 transition-[flex-grow] duration-300 ${
                   isExpanded ? "grow-[25]" : "grow"
                 }`}
               >
                 {/* flex (not grid) so an expanded day can widen via flex-grow.
-                    The blue outline marks the selection: on the week when no
-                    day is picked, else on the picked day cell below. */}
+                    The blue outline marks the selection: on the scan block, or
+                    on the picked day cell below. */}
                 <div
                   className={`flex min-w-0 flex-1 ${
                     wi < 5 ? "border-b border-zinc-800/60" : "overflow-hidden rounded-b-xl"
-                  } ${
-                    isExpanded && expandedDay === null
-                      ? "outline outline-2 -outline-offset-2 outline-blue-500"
-                      : ""
                   }`}
                 >
-                  {isExpanded && expandedDay === null ? (
-                    // Unified week scan: one schedule scrollbar across all 7 days
-                    // (top ~60%), with a per-day log row below (~40%).
-                    <div className="flex min-h-0 w-full flex-col gap-1 px-0.5 py-1">
-                      <div className="flex shrink-0">
-                        <div style={{ width: SCAN_GUTTER }} className="shrink-0" />
-                        {week.map((cell) => {
-                          const key = dateKey(cell.year, cell.month, cell.day);
-                          const wx = wi === currentWeekIndex ? weatherByDay.get(key) : undefined;
-                          return (
-                            <div
-                              key={key}
-                              onContextMenu={(e) => openContextMenu(e, key)}
-                              className="flex min-w-0 flex-1 items-center justify-between gap-1 px-0.5"
-                            >
-                              <button
-                                type="button"
-                                aria-label={`Open ${key}`}
-                                onClick={() => openDay(wi, key, true)}
-                                className={`${dayNumClass({
-                                  isPeriod: periodDays.has(key),
-                                  isToday: key === todayKey,
-                                  inMonth: cell.inMonth,
-                                  small: false,
-                                })} hover:opacity-80`}
-                              >
-                                {cell.day}
-                              </button>
-                              <span className="flex min-w-0 items-center gap-1">
-                                {wx && (
-                                  <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-zinc-400">
-                                    <span className="leading-none">{weatherEmoji(wx.code)}</span>
-                                    <span className="tabular-nums">{wx.tempMax}°</span>
-                                  </span>
-                                )}
-                                <CashflowBadge day={cashflowByDay.get(key)} covered={isCashCovered(key)} />
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div className="flex min-h-0 grow-[3] basis-0 flex-col">
-                        <WeekSchedule
-                          dates={week.map((c) => dateKey(c.year, c.month, c.day))}
-                          gutter={SCAN_GUTTER}
-                          onDateContextMenu={openContextMenu}
-                        />
-                      </div>
-                      <div className="flex min-h-0 grow-[2] basis-0">
-                        <div style={{ width: SCAN_GUTTER }} className="shrink-0" />
-                        {week.map((cell) => {
-                          const key = dateKey(cell.year, cell.month, cell.day);
-                          return (
-                            <div
-                              key={key}
-                              className="flex min-w-0 flex-1 flex-col border-l border-zinc-800/60 px-0.5"
-                            >
-                              <DayLog date={key} showLabel={false} />
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : (
+                  {isExpanded && expandedDay === null && selection ? (
+                    // Selected-days scan: the drag-selected days share one
+                    // schedule scrollbar (top ~60%) with a per-day log row
+                    // below (~40%); unselected cells squeeze to slim strips.
+                    // Clicking non-control space in the scan collapses it.
                     week.map((cell) => {
-                    const key = dateKey(cell.year, cell.month, cell.day);
+                      const key = cellKey(cell);
+                      const selIdx = selection.indexOf(key);
+                      if (selIdx > 0) return null; // covered by the scan block
+                      if (selIdx === -1) {
+                        return (
+                          <button
+                            type="button"
+                            key={key}
+                            onClick={() => handleCellClick(wi, key)}
+                            onContextMenu={(e) => openContextMenu(e, key)}
+                            aria-label={key}
+                            className={`flex grow-0 basis-6 flex-col overflow-hidden border-r border-zinc-800/60 p-0.5 text-left last:border-r-0 hover:bg-zinc-800/40 ${
+                              cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
+                            }`}
+                          >
+                            <span className={dayNum(key, cell.inMonth, true)}>{cell.day}</span>
+                          </button>
+                        );
+                      }
+                      const selCells = week.filter((c) => selection.includes(cellKey(c)));
+                      return (
+                        <div
+                          key={key}
+                          onClick={(e) => {
+                            if (isControlClick(e)) return;
+                            collapseAll();
+                          }}
+                          className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 px-0.5 py-1 outline outline-2 -outline-offset-2 outline-blue-500"
+                        >
+                          <div className="flex shrink-0">
+                            <div style={{ width: SCAN_GUTTER }} className="shrink-0" />
+                            {selCells.map((c) => {
+                              const k = cellKey(c);
+                              return (
+                                <div
+                                  key={k}
+                                  onContextMenu={(e) => openContextMenu(e, k)}
+                                  className="flex min-w-0 flex-1 items-center justify-between gap-1 px-0.5"
+                                >
+                                  <button
+                                    type="button"
+                                    aria-label={`Open ${k}`}
+                                    onClick={() => openDayInSelection(wi, k)}
+                                    className={`${dayNum(k, c.inMonth, false)} hover:opacity-80`}
+                                  >
+                                    {c.day}
+                                  </button>
+                                  <span className="flex min-w-0 items-center gap-1">
+                                    {dayBadges(k, wi, true)}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="flex min-h-0 grow-[3] basis-0 flex-col">
+                            <WeekSchedule
+                              dates={selection}
+                              gutter={SCAN_GUTTER}
+                              onDateContextMenu={openContextMenu}
+                            />
+                          </div>
+                          <div className="flex min-h-0 grow-[2] basis-0">
+                            <div style={{ width: SCAN_GUTTER }} className="shrink-0" />
+                            {selCells.map((c) => {
+                              const k = cellKey(c);
+                              return (
+                                <div
+                                  key={k}
+                                  className="flex min-w-0 flex-1 flex-col border-l border-zinc-800/60 px-0.5"
+                                >
+                                  <DayLog date={k} showLabel={false} />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    week.map((cell, di) => {
+                    const key = cellKey(cell);
+                    const inDragSel =
+                      dragSel !== null && dragSel.week === wi && di >= dragSel.a && di <= dragSel.b;
                     const entries = byDay.get(key) ?? [];
                     const dayEvents = eventsByDay.get(key) ?? [];
-                    const isToday = key === todayKey;
                     const isDayExpanded = isExpanded && expandedDay === key;
                     // Siblings of an expanded day squeeze to a fixed width that
                     // fits just the (small) day number (basis-6 = number +
                     // padding), so the expanded day gets as much width as
-                    // possible.
+                    // possible. Squeezed siblings use the same small number as
+                    // the compressed week rows.
                     const isDaySqueezed = isExpanded && expandedDay !== null && !isDayExpanded;
-                    const wx = wi === currentWeekIndex ? weatherByDay.get(key) : undefined;
-                    const isPeriod = periodDays.has(key);
-                    const dayNumberClass = dayNumClass({
-                      isPeriod,
-                      isToday,
-                      inMonth: cell.inMonth,
-                      // Squeezed siblings use the same small number as the
-                      // compressed week rows.
-                      small: isCompressed || isDaySqueezed,
-                    });
-                    const showBadges = !isCompressed && !isDaySqueezed;
-                    const weatherBadge = wx && showBadges && (
-                      <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-zinc-400">
-                        <span className="leading-none">{weatherEmoji(wx.code)}</span>
-                        <span className="tabular-nums">{wx.tempMax}°</span>
-                      </span>
-                    );
+                    const dayNumberClass = dayNum(key, cell.inMonth, isCompressed || isDaySqueezed);
                     // Weather (current-week forecast) then cashflow, right-aligned.
-                    const rightBadges = showBadges && (
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        {weatherBadge}
-                        <CashflowBadge day={cashflowByDay.get(key)} covered={isCashCovered(key)} />
-                      </span>
+                    const rightBadges = !isCompressed && !isDaySqueezed && (
+                      <span className="flex min-w-0 items-center gap-1.5">{dayBadges(key, wi)}</span>
                     );
 
                     // The expanded day hosts a form with real inputs (the log
@@ -457,8 +825,7 @@ export function CalendarPage() {
                           // except on a control (typing in the log, hitting a
                           // button). Origin decides how far back collapsing goes.
                           onClick={(e) => {
-                            if ((e.target as HTMLElement).closest("input, textarea, button, select, a"))
-                              return;
+                            if (isControlClick(e)) return;
                             collapseExpandedDay();
                           }}
                           aria-label={key}
@@ -488,10 +855,18 @@ export function CalendarPage() {
                       <button
                         type="button"
                         key={key}
-                        onClick={() => openDay(wi, key, isExpanded)}
+                        data-wi={wi}
+                        data-di={di}
+                        onPointerDown={(e) => beginDrag(e, wi, di)}
+                        onClick={() => handleCellClick(wi, key)}
                         onContextMenu={(e) => openContextMenu(e, key)}
                         aria-label={key}
-                        className={`flex flex-col overflow-hidden border-r border-zinc-800/60 text-left transition-[flex-grow,flex-basis,padding] duration-300 last:border-r-0 hover:bg-zinc-800/40 ${
+                        style={
+                          dragSel && inDragSel
+                            ? { boxShadow: dragSelShadow(di === dragSel.a, di === dragSel.b) }
+                            : undefined
+                        }
+                        className={`flex select-none flex-col overflow-hidden border-r border-zinc-800/60 text-left transition-[flex-grow,flex-basis,padding] duration-300 [-webkit-touch-callout:none] last:border-r-0 hover:bg-zinc-800/40 ${
                           isDaySqueezed ? "grow-0 basis-6" : "grow basis-0"
                         } ${isCompressed || isDaySqueezed ? "p-0.5" : "p-1.5"} ${
                           cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
@@ -507,32 +882,13 @@ export function CalendarPage() {
                     })
                   )}
                 </div>
-                {/* Side tabs: appear on row hover, extend 1.5rem past each edge,
-                    and toggle this week's expansion. */}
-                <button
-                  type="button"
-                  aria-label={isExpanded ? `Collapse week ${wi + 1}` : `Expand week ${wi + 1}`}
-                  aria-expanded={isExpanded}
-                  onClick={() => toggleWeek(wi, isExpanded)}
-                  className={`${tabClass} -left-6 rounded-l-lg border-r-0`}
-                >
-                  {isExpanded ? "−" : "+"}
-                </button>
-                <button
-                  type="button"
-                  aria-label={isExpanded ? `Collapse week ${wi + 1}` : `Expand week ${wi + 1}`}
-                  aria-expanded={isExpanded}
-                  onClick={() => toggleWeek(wi, isExpanded)}
-                  className={`${tabClass} -right-6 rounded-r-lg border-l-0`}
-                >
-                  {isExpanded ? "−" : "+"}
-                </button>
               </div>
             );
           })}
           </div>
         </div>
       </div>
+      )}
 
       {menu && (
         <>
