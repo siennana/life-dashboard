@@ -21,6 +21,7 @@ import {
   type PlaidCreds,
 } from "./connectors/plaid";
 import { syncGithub } from "./connectors/github";
+import { syncWakatime } from "./connectors/wakatime";
 import { getUiSettings, saveUiSettings } from "./settings";
 import {
   bookInputSchema,
@@ -102,6 +103,7 @@ function processDefs(): ProcessDef[] {
     { key: "plaid", label: "Plaid", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidUsBankAccessToken) },
     { key: "nm", label: "Northwestern Mutual", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidNmAccessToken) },
     { key: "github", label: "GitHub", type: "GraphQL API", cadence: CADENCE_INTERVAL, configured: Boolean(config.githubToken) },
+    { key: "wakatime", label: "WakaTime", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.wakatimeApiKey) },
     // Both hit only by the market snapshot, which is gated on the Finnhub key.
     { key: "finnhub", label: "Finnhub", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
     { key: "yahoo", label: "Yahoo Finance", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
@@ -303,6 +305,43 @@ app.get("/api/github/commits", async (_req, reply) => {
   };
 });
 
+// WakaTime coding time: the accumulated daily series plus 7-day breakdowns
+// (Projects page). Aggregates come from our stored rows, not the API, so they
+// keep working past WakaTime's free 14-day window.
+app.get("/api/wakatime", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const rows = await db
+    .select({ date: metrics.date, value: metrics.value, payload: metrics.payload })
+    .from(metrics)
+    .where(and(eq(metrics.source, "wakatime"), eq(metrics.name, "coding_seconds")))
+    .orderBy(asc(metrics.date));
+  const days = rows.map((r) => ({ date: r.date, seconds: Number(r.value) }));
+
+  const today = new Date().toLocaleDateString("en-CA");
+  const weekStart = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toLocaleDateString("en-CA");
+  const week = rows.filter((r) => r.date >= weekStart);
+  const aggregate = (key: "languages" | "projects") => {
+    const sums = new Map<string, number>();
+    for (const r of week) {
+      const list = ((r.payload ?? {}) as Record<string, { name: string; seconds: number }[]>)[key] ?? [];
+      for (const x of list) sums.set(x.name, (sums.get(x.name) ?? 0) + x.seconds);
+    }
+    return [...sums.entries()]
+      .map(([name, seconds]) => ({ name, seconds }))
+      .sort((a, b) => b.seconds - a.seconds)
+      .slice(0, 10);
+  };
+
+  return {
+    configured: Boolean(config.wakatimeApiKey),
+    days,
+    todaySeconds: days.find((d) => d.date === today)?.seconds ?? null,
+    weekSeconds: week.reduce((a, r) => a + Number(r.value), 0),
+    languages: aggregate("languages"),
+    projects: aggregate("projects"),
+  };
+});
+
 // Weather: live 7-day forecast from Open-Meteo for the configured location.
 // ?force=true bypasses the 30min in-memory cache (the widget's sync button).
 app.get("/api/weather", async (req) => {
@@ -498,7 +537,7 @@ app.delete("/api/books/:id", async (req, reply) => {
 });
 
 // The connectors that can be synced on demand, keyed by their sync_runs source.
-const SYNCABLE_SOURCES = ["todoist", "calendar", "plaid", "nm", "fidelity", "factset", "github"] as const;
+const SYNCABLE_SOURCES = ["todoist", "calendar", "plaid", "nm", "fidelity", "factset", "github", "wakatime"] as const;
 type SyncableSource = (typeof SYNCABLE_SOURCES)[number];
 
 // Run one connector by its source key. Returns the connector's own result, or a
@@ -537,6 +576,10 @@ function runConnector(activeDb: NonNullable<typeof db>, source: SyncableSource):
     case "github":
       return config.githubToken
         ? syncGithub(activeDb, config.githubToken)
+        : Promise.resolve({ skipped: "not configured" });
+    case "wakatime":
+      return config.wakatimeApiKey
+        ? syncWakatime(activeDb, config.wakatimeApiKey)
         : Promise.resolve({ skipped: "not configured" });
   }
 }
@@ -646,6 +689,13 @@ async function runSyncs() {
         await syncGithub(activeDb, config.githubToken);
       } catch (err) {
         app.log.error({ err }, "github sync failed");
+      }
+    }
+    if (config.wakatimeApiKey) {
+      try {
+        await syncWakatime(activeDb, config.wakatimeApiKey);
+      } catch (err) {
+        app.log.error({ err }, "wakatime sync failed");
       }
     }
     // Market data: price each account's portfolio + upsert today's value

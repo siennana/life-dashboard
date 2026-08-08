@@ -339,6 +339,25 @@ export const githubCommitsResponseSchema = z.object({
 });
 export type GithubCommitsResponse = z.infer<typeof githubCommitsResponseSchema>;
 
+// WakaTime coding time (Projects page). `days` is the full accumulated
+// series (the DB outlives WakaTime's free 14-day API window); breakdowns are
+// aggregated server-side over the trailing 7 days.
+export const wakatimeSliceSchema = z.object({
+  name: z.string(),
+  seconds: z.number(),
+});
+export type WakatimeSlice = z.infer<typeof wakatimeSliceSchema>;
+
+export const wakatimeResponseSchema = z.object({
+  configured: z.boolean(), // false = no WAKATIME_API_KEY on this machine
+  days: z.array(z.object({ date: z.string(), seconds: z.number() })), // oldest first
+  todaySeconds: z.number().nullable(),
+  weekSeconds: z.number(), // trailing 7 days including today
+  languages: z.array(wakatimeSliceSchema), // 7-day aggregate, desc
+  projects: z.array(wakatimeSliceSchema), // 7-day aggregate, desc
+});
+export type WakatimeResponse = z.infer<typeof wakatimeResponseSchema>;
+
 // Which Plaid product set to request at link time: "transactions" = the bank
 // item (spending), "investments" = the NM brokerage item (stock holdings).
 export const plaidLinkTokenInputSchema = z.object({

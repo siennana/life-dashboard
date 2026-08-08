@@ -37,6 +37,8 @@ const envSchema = z.object({
   PLAID_FIDELITY_ACCESS_TOKEN: z.string().optional(),
   // GitHub PAT (classic, read:user scope only) for the contribution heatmap.
   GITHUB_TOKEN: z.string().optional(),
+  // WakaTime API key (wakatime.com/settings/api-key) - coding time on Projects.
+  WAKATIME_API_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -93,5 +95,6 @@ export const config = {
   plaidNmAccessToken: env.PLAID_NM_ACCESS_TOKEN,
   plaidFidelityAccessToken: env.PLAID_FIDELITY_ACCESS_TOKEN,
   githubToken: env.GITHUB_TOKEN,
+  wakatimeApiKey: env.WAKATIME_API_KEY,
   warnings,
 };

@@ -23,6 +23,7 @@ import type {
   StockAccount,
   UiSettings,
   UploadResponse,
+  WakatimeResponse,
   WeatherResponse,
 } from "@life/shared";
 
@@ -128,6 +129,8 @@ export const getContributions = () =>
   apiFetch<ContributionsResponse>("/api/github/contributions");
 
 export const getGithubRepos = () => apiFetch<GithubReposResponse>("/api/github/repos");
+
+export const getWakatime = () => apiFetch<WakatimeResponse>("/api/wakatime");
 
 export const getGithubCommits = () => apiFetch<GithubCommitsResponse>("/api/github/commits");
 
