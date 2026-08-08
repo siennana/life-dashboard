@@ -26,7 +26,6 @@ export const NAV_ITEMS: NavItem[] = [
   { path: "/exercise", label: "Exercise", implemented: true },
   { path: "/reading", label: "Reading", implemented: true },
   { path: "/projects", label: "Projects" },
-  { path: "/wedding", label: "Wedding" },
   { path: "/settings", label: "Settings", implemented: true, bottom: true },
 ];
 
