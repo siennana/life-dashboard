@@ -1,6 +1,7 @@
 import { WeatherWidget } from "../components/WeatherWidget";
 import { WeekCalendar } from "../components/WeekCalendar";
 import { FinanceWidget } from "../components/FinanceWidget";
+import { GithubWidget } from "../components/GithubWidget";
 import { TodosWidget } from "../components/TodosWidget";
 import { SyncStatus } from "../components/SyncStatus";
 
@@ -15,6 +16,7 @@ export function Home() {
         <FinanceWidget />
         <TodosWidget />
       </div>
+      <GithubWidget />
       <SyncStatus />
     </div>
   );

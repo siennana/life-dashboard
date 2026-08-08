@@ -13,6 +13,7 @@ import { Home } from "./pages/Home";
 import { Finance } from "./pages/Finance";
 import { Placeholder } from "./pages/Placeholder";
 import { PlaidLink } from "./pages/PlaidLink";
+import { Projects } from "./pages/Projects";
 import { Reading } from "./pages/Reading";
 import { Settings } from "./pages/Settings";
 import { Stocks, StocksIndexRedirect } from "./pages/Stocks";
@@ -43,6 +44,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="finance/stocks/:account" element={<Stocks />} />
               <Route path="finance/bank" element={<Bank />} />
               <Route path="exercise" element={<Exercise />} />
+              <Route path="projects" element={<Projects />} />
               <Route path="reading" element={<Reading />} />
               <Route path="settings" element={<Settings />} />
               {/* Hidden utility page for one-time Plaid bank linking. */}
