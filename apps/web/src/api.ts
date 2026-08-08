@@ -125,7 +125,8 @@ export const deleteBook = (id: number) => apiDelete(`/api/books/${id}`);
 
 export const getCalendarEvents = () => apiFetch<CalendarEventsResponse>("/api/calendar/events");
 
-export const getWeather = () => apiFetch<WeatherResponse>("/api/weather");
+export const getWeather = (force = false) =>
+  apiFetch<WeatherResponse>(`/api/weather${force ? "?force=true" : ""}`);
 
 export const getUiSettings = () => apiFetch<UiSettings>("/api/settings/ui");
 

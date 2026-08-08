@@ -73,9 +73,21 @@ type Config = {
   weatherLongitude?: number;
 };
 
-const EMPTY: WeatherResponse = { configured: false, location: null, current: null, daily: [] };
+const EMPTY: WeatherResponse = {
+  configured: false,
+  location: null,
+  current: null,
+  hourly: [],
+  daily: [],
+  fetchedAt: null,
+};
 
-export async function getWeather(config: Config): Promise<WeatherResponse> {
+const HOURLY_WINDOW = 24; // hours ahead to keep, trimmed from Open-Meteo's full week
+
+export async function getWeather(
+  config: Config,
+  opts: { force?: boolean } = {},
+): Promise<WeatherResponse> {
   // Explicit coordinates win; otherwise geocode the location name.
   let coords: Coords | null = null;
   if (config.weatherLatitude != null && config.weatherLongitude != null) {
@@ -86,12 +98,16 @@ export async function getWeather(config: Config): Promise<WeatherResponse> {
     };
   } else if (config.weatherLocation) {
     coords = await geocode(config.weatherLocation);
+    // Geocoding is only for finding coordinates — display the location as the
+    // user configured it (e.g. "Boston, MA"), not the geocoder's verbose form
+    // (e.g. "Boston, Massachusetts").
+    if (coords) coords = { ...coords, label: config.weatherLocation };
   }
   if (!coords) return EMPTY;
 
   const key = `${coords.lat.toFixed(3)},${coords.lon.toFixed(3)}`;
   const now = Date.now();
-  if (forecastCache && forecastCache.key === key && forecastCache.expires > now) {
+  if (!opts.force && forecastCache && forecastCache.key === key && forecastCache.expires > now) {
     return forecastCache.data;
   }
 
@@ -99,6 +115,7 @@ export async function getWeather(config: Config): Promise<WeatherResponse> {
   url.searchParams.set("latitude", String(coords.lat));
   url.searchParams.set("longitude", String(coords.lon));
   url.searchParams.set("current", "temperature_2m,weather_code");
+  url.searchParams.set("hourly", "temperature_2m,weather_code,precipitation_probability");
   url.searchParams.set(
     "daily",
     "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
@@ -110,7 +127,13 @@ export async function getWeather(config: Config): Promise<WeatherResponse> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Open-Meteo forecast failed: ${res.status}`);
   const body = (await res.json()) as {
-    current?: { temperature_2m: number; weather_code: number };
+    current?: { time: string; temperature_2m: number; weather_code: number };
+    hourly: {
+      time: string[];
+      temperature_2m: number[];
+      weather_code: number[];
+      precipitation_probability: (number | null)[];
+    };
     daily: {
       time: string[];
       weather_code: number[];
@@ -129,6 +152,22 @@ export async function getWeather(config: Config): Promise<WeatherResponse> {
     precipProbability: body.daily.precipitation_probability_max[i] ?? null,
   }));
 
+  // `current.time` anchors "now" in the forecast location's local timezone
+  // (not the server's) — hourly entries are trimmed to the window starting
+  // there, since Open-Meteo otherwise hands back a full week hourly. Truncate
+  // to the hour (":00") since current.time carries minutes but hourly slots
+  // don't, and a plain string compare would drop the in-progress hour.
+  const nowLocal = `${(body.current?.time ?? body.hourly.time[0]!).slice(0, 13)}:00`;
+  const hourly = body.hourly.time
+    .map((time, i) => ({
+      time,
+      code: body.hourly.weather_code[i]!,
+      temp: Math.round(body.hourly.temperature_2m[i]!),
+      precipProbability: body.hourly.precipitation_probability[i] ?? null,
+    }))
+    .filter((h) => h.time >= nowLocal)
+    .slice(0, HOURLY_WINDOW);
+
   const data: WeatherResponse = {
     configured: true,
     location: coords.label,
@@ -139,7 +178,9 @@ export async function getWeather(config: Config): Promise<WeatherResponse> {
           label: label(body.current.weather_code),
         }
       : null,
+    hourly,
     daily,
+    fetchedAt: new Date().toISOString(),
   };
 
   forecastCache = { key, expires: now + FORECAST_TTL_MS, data };

@@ -213,7 +213,11 @@ app.get("/api/finance/portfolio", async (_req, reply) => {
 });
 
 // Weather: live 7-day forecast from Open-Meteo for the configured location.
-app.get("/api/weather", async () => getWeather(config));
+// ?force=true bypasses the 30min in-memory cache (the widget's sync button).
+app.get("/api/weather", async (req) => {
+  const { force } = req.query as { force?: string };
+  return getWeather(config, { force: force === "true" });
+});
 
 // UI settings (Settings page): font + theme, one jsonb row in `settings`.
 app.get("/api/settings/ui", async (_req, reply) => {

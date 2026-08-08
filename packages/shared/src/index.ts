@@ -225,13 +225,27 @@ export const weatherDaySchema = z.object({
 });
 export type WeatherDay = z.infer<typeof weatherDaySchema>;
 
+// One hourly slot, trimmed server-side to the next ~24h from now (Open-Meteo
+// returns a full week hourly, which is more than the widget needs).
+export const weatherHourSchema = z.object({
+  time: z.string(), // YYYY-MM-DDTHH:00, local to the forecast location
+  code: z.number(),
+  temp: z.number(),
+  precipProbability: z.number().nullable(),
+});
+export type WeatherHour = z.infer<typeof weatherHourSchema>;
+
 export const weatherResponseSchema = z.object({
   configured: z.boolean(),
   location: z.string().nullable(),
   current: z
     .object({ temp: z.number(), code: z.number(), label: z.string() })
     .nullable(),
+  hourly: z.array(weatherHourSchema),
   daily: z.array(weatherDaySchema),
+  // When this data was actually pulled from Open-Meteo (not when the browser
+  // asked) — the 30min server-side cache means those can differ.
+  fetchedAt: z.string().nullable(),
 });
 export type WeatherResponse = z.infer<typeof weatherResponseSchema>;
 
