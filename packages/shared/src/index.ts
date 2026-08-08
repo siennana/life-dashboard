@@ -230,6 +230,7 @@ export type WeatherDay = z.infer<typeof weatherDaySchema>;
 export const weatherHourSchema = z.object({
   time: z.string(), // YYYY-MM-DDTHH:00, local to the forecast location
   code: z.number(),
+  label: z.string(), // ASCII WMO description (for the tooltip)
   temp: z.number(),
   precipProbability: z.number().nullable(),
 });

@@ -162,6 +162,7 @@ export async function getWeather(
     .map((time, i) => ({
       time,
       code: body.hourly.weather_code[i]!,
+      label: label(body.hourly.weather_code[i]!),
       temp: Math.round(body.hourly.temperature_2m[i]!),
       precipProbability: body.hourly.precipitation_probability[i] ?? null,
     }))

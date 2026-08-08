@@ -16,7 +16,7 @@ function HourCard({ hour, index }: { hour: WeatherHour; index: number }) {
   return (
     <div className="flex min-w-12 flex-1 flex-col items-center gap-1">
       <span className="text-xs font-medium text-zinc-400">{hourLabel(hour.time, index)}</span>
-      <span className="text-lg" title={weatherEmoji(hour.code)}>
+      <span className="text-lg" title={hour.label}>
         {weatherEmoji(hour.code)}
       </span>
       <span className="text-sm tabular-nums text-zinc-100">{hour.temp}&deg;</span>
@@ -93,7 +93,9 @@ export function WeatherWidget() {
       {weather.data?.configured && (
         <>
           {weather.data.current && (
-            <div className="mt-3 flex items-center gap-4">
+            // Stack on mobile (hourly strip full-width below the current block,
+            // scrolls if it still doesn't fit); side by side from sm up.
+            <div className="mt-3 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
               <div className="flex shrink-0 items-center gap-3">
                 <span className="text-4xl" title={weather.data.current.label}>
                   {weatherEmoji(weather.data.current.code)}
@@ -106,7 +108,12 @@ export function WeatherWidget() {
                 </div>
               </div>
               {weather.data.hourly.length > 0 && (
-                <div className="flex min-w-0 flex-1 items-center gap-1 border-l border-zinc-800 pl-4">
+                // min-w-0 so the scroller can shrink to its parent and scroll
+                // internally instead of widening the page (flex min-width:auto).
+                // scrollbar-width:none hides the bar (touch/trackpad swipe still
+                // scrolls on mobile) — on Windows the classic scrollbar otherwise
+                // pops in on any 1px overflow and eats the row's height.
+                <div className="flex min-w-0 gap-1 overflow-x-auto [scrollbar-width:none] sm:flex-1 sm:border-l sm:border-zinc-800 sm:pl-4">
                   {weather.data.hourly.slice(0, HOURS_SHOWN).map((hour, i) => (
                     <HourCard key={hour.time} hour={hour} index={i} />
                   ))}
@@ -114,7 +121,7 @@ export function WeatherWidget() {
               )}
             </div>
           )}
-          <div className="mt-4 flex gap-2 overflow-x-auto">
+          <div className="mt-4 flex gap-2 overflow-x-auto [scrollbar-width:none]">
             {weather.data.daily.map((day, i) => (
               <DayCard key={day.date} day={day} index={i} />
             ))}
