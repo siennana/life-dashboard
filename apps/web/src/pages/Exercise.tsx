@@ -384,7 +384,6 @@ export function Exercise() {
               <thead>
                 <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
                   <th className="px-4 py-3 font-medium">Date</th>
-                  <th className="px-4 py-3 font-medium">Time</th>
                   <th className="px-4 py-3 font-medium">Type</th>
                   <th className="px-4 py-3 font-medium">Log</th>
                   <th className="px-4 py-3 text-right font-medium">Duration</th>
@@ -404,10 +403,10 @@ export function Exercise() {
                         }`}
                       >
                         <td className="whitespace-nowrap px-4 py-3 text-zinc-300">
-                          {prettyDate(r.date)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-zinc-300">
-                          {r.time == null ? "—" : prettyTime(r.time)}
+                          <div>{prettyDate(r.date)}</div>
+                          {r.time != null && (
+                            <div className="text-xs text-zinc-500">{prettyTime(r.time)}</div>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs capitalize text-zinc-200">
@@ -436,7 +435,7 @@ export function Exercise() {
                       </tr>
                       {isEditing && (
                         <tr className="bg-zinc-800/40">
-                          <td colSpan={8} className="p-0">
+                          <td colSpan={7} className="p-0">
                             <SlideDown open={!closing}>
                               <div className="px-3 pb-3">
                                 <LogForm inline editing={r} onDone={closeEdit} />
