@@ -2,6 +2,7 @@ import { Link, Navigate, useLocation } from "react-router-dom";
 import { NAV_ITEMS, type NavItem } from "../nav";
 import { useIsMobile } from "../lib/useIsMobile";
 import { ChevronLeftIcon, ChevronRightIcon } from "./icons";
+import { NAV_ICONS } from "./SideNav";
 
 // Mobile navigation (below the `md` breakpoint): the index route (`/`) shows
 // the nav tree as a full-screen menu, and every page gets a sticky header
@@ -11,12 +12,20 @@ import { ChevronLeftIcon, ChevronRightIcon } from "./icons";
 // One tappable row — taller than the desktop sidebar rows on purpose
 // (comfortable touch target), trailing chevron as the "drills in" affordance.
 function MenuRow({ item }: { item: NavItem }) {
+  const Icon = NAV_ICONS[item.path];
   return (
     <Link
       to={item.path}
       className="flex items-center justify-between rounded-lg px-3 py-3 text-base text-zinc-200 active:bg-zinc-800"
     >
-      <span className="truncate">{item.label}</span>
+      <span className="flex min-w-0 items-center gap-2.5">
+        {Icon && (
+          <span className="shrink-0 text-zinc-400" aria-hidden="true">
+            <Icon className="h-4 w-4" />
+          </span>
+        )}
+        <span className="truncate">{item.label}</span>
+      </span>
       <span className="shrink-0 text-zinc-500">
         <ChevronRightIcon className="h-4 w-4" />
       </span>

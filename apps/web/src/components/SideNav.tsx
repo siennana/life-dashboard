@@ -1,7 +1,51 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { NAV_ITEMS, type NavItem } from "../nav";
-import { ChevronRightIcon, GearIcon } from "./icons";
+import {
+  BankIcon,
+  BookIcon,
+  CalendarIcon,
+  ChevronRightIcon,
+  ExerciseIcon,
+  FolderIcon,
+  GearIcon,
+  HomeIcon,
+  TodoIcon,
+  TrendingUpIcon,
+  WalletIcon,
+} from "./icons";
+
+// Page icon per nav path (nav.ts stays plain data — no React imports there).
+// Convention (subject to change): an icon marks a page that is a *report with
+// data*; a pure navigation folder (Stocks — its bare path just redirects to a
+// tab) gets only the expand chevron. Finance keeps its icon because /finance
+// is itself a data page, not just a folder.
+export const NAV_ICONS: Record<string, (props: { className?: string }) => React.ReactElement> = {
+  "/home": HomeIcon,
+  "/todos": TodoIcon,
+  "/calendar": CalendarIcon,
+  "/finance": WalletIcon,
+  "/finance/stocks/individual": TrendingUpIcon,
+  "/finance/stocks/nm": TrendingUpIcon,
+  "/finance/stocks/factset": TrendingUpIcon,
+  "/finance/bank": BankIcon,
+  "/exercise": ExerciseIcon,
+  "/reading": BookIcon,
+  "/projects": FolderIcon,
+  "/settings": GearIcon,
+};
+
+// The icon column: fixed-size slot so labels align whether or not a row has
+// an icon.
+function NavIcon({ path }: { path: string }) {
+  const Icon = NAV_ICONS[path];
+  if (!Icon) return null;
+  return (
+    <span className="flex w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
+      <Icon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
 
 // Sidebar width is a per-window layout dimension (like a scroll position),
 // not a synced preference, so it lives in localStorage rather than the
@@ -56,6 +100,7 @@ function NavEntry({ item }: { item: NavItem }) {
       <li>
         <NavLink to={item.path} className={({ isActive }) => rowClass(isActive)}>
           <span className="w-3.5 shrink-0" aria-hidden="true" />
+          <NavIcon path={item.path} />
           <span className="truncate">{item.label}</span>
         </NavLink>
       </li>
@@ -79,8 +124,9 @@ function NavEntry({ item }: { item: NavItem }) {
         >
           <Chevron open={open} />
         </button>
-        <NavLink to={item.path} end className="min-w-0 flex-1 truncate">
-          {item.label}
+        <NavLink to={item.path} end className="flex min-w-0 flex-1 items-center gap-1.5">
+          <NavIcon path={item.path} />
+          <span className="truncate">{item.label}</span>
         </NavLink>
       </div>
       {open && (

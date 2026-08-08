@@ -29,6 +29,7 @@ export const NAV_ITEMS: NavItem[] = [
         children: [
           { path: "/finance/stocks/individual", label: "Individual", implemented: true },
           { path: "/finance/stocks/nm", label: "NM", implemented: true },
+          { path: "/finance/stocks/factset", label: "FactSet 401k", implemented: true },
         ],
       },
       { path: "/finance/bank", label: "Bank", implemented: true },
@@ -36,7 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   { path: "/exercise", label: "Exercise", implemented: true },
   { path: "/reading", label: "Reading", implemented: true },
-  { path: "/projects", label: "Projects" },
+  { path: "/projects", label: "Projects", implemented: true },
   { path: "/settings", label: "Settings", implemented: true, bottom: true },
 ];
 
