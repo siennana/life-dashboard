@@ -1,6 +1,19 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { NAV_ITEMS, type NavItem } from "../nav";
+
+// Sidebar width is a per-window layout dimension (like a scroll position),
+// not a synced preference, so it lives in localStorage rather than the
+// Settings > Style DB round-trip — it also needs to update at drag speed.
+const WIDTH_KEY = "sidenav-width";
+const MIN_WIDTH = 160;
+const MAX_WIDTH = 400;
+const DEFAULT_WIDTH = 192; // matches the old fixed w-48
+
+function readStoredWidth(): number {
+  const n = Number(localStorage.getItem(WIDTH_KEY));
+  return Number.isFinite(n) && n > 0 ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n)) : DEFAULT_WIDTH;
+}
 
 // VS Code file-tree styling: a rotating chevron on the left of expandable
 // items (files get an aligned blank in the chevron column), flat full-row
@@ -106,30 +119,117 @@ function GearIcon() {
   );
 }
 
+// Drag handle straddling the sidebar's right border: a wide (8px) invisible
+// hit target with a 1px line centered in it that lights up blue on hover and
+// while dragging, so the affordance appears before the user commits to a drag.
+function ResizeHandle({
+  dragging,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onDoubleClick,
+}: {
+  dragging: boolean;
+  onPointerDown: (e: React.PointerEvent) => void;
+  onPointerMove: (e: React.PointerEvent) => void;
+  onPointerUp: (e: React.PointerEvent) => void;
+  onDoubleClick: () => void;
+}) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar (double-click to reset)"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onDoubleClick={onDoubleClick}
+      className="group absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none select-none"
+    >
+      <div
+        className={`absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors ${
+          dragging ? "bg-blue-500" : "bg-transparent group-hover:bg-blue-500/70"
+        }`}
+      />
+    </div>
+  );
+}
+
 export function SideNav() {
   const mainItems = NAV_ITEMS.filter((i) => !i.bottom);
   const bottomItems = NAV_ITEMS.filter((i) => i.bottom);
+
+  const [width, setWidth] = useState(readStoredWidth);
+  const [dragging, setDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  function onPointerDown(e: React.PointerEvent) {
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setDragging(true);
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (!dragging) return;
+    const left = containerRef.current?.getBoundingClientRect().left ?? 0;
+    setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, e.clientX - left)));
+  }
+
+  function onPointerUp() {
+    setDragging(false);
+  }
+
+  // Persist after each change (drag or double-click reset); cheap enough to
+  // just follow `width` rather than special-casing "drag ended".
+  useEffect(() => {
+    localStorage.setItem(WIDTH_KEY, String(width));
+  }, [width]);
+
+  // While dragging, force the resize cursor and block text selection
+  // everywhere — otherwise fast pointer moves over page content flash the
+  // wrong cursor and can select text.
+  useEffect(() => {
+    if (!dragging) return;
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+    };
+  }, [dragging]);
+
   return (
-    <nav className="flex w-48 shrink-0 flex-col overflow-y-auto border-r border-zinc-800 bg-zinc-900 p-3">
-      <div className="px-2 text-sm font-semibold text-zinc-100">Life Dashboard</div>
-      <ul className="mt-4 space-y-0.5">
-        {mainItems.map((item) => (
-          <NavEntry key={item.path} item={item} />
-        ))}
-      </ul>
-      {/* Bottom-pinned entries (Settings) below a divider. */}
-      <ul className="mt-auto space-y-0.5 border-t border-zinc-800 pt-2">
-        {bottomItems.map((item) => (
-          <li key={item.path}>
-            <NavLink to={item.path} className={({ isActive }) => rowClass(isActive)}>
-              <span className="flex w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
-                <GearIcon />
-              </span>
-              <span className="truncate">{item.label}</span>
-            </NavLink>
-          </li>
-        ))}
-      </ul>
-    </nav>
+    <div ref={containerRef} className="relative hidden shrink-0 md:flex" style={{ width }}>
+      <nav className="flex w-full flex-col overflow-y-auto border-r border-zinc-800 bg-zinc-900 p-3">
+        <div className="px-2 text-sm font-semibold text-zinc-100">Life Dashboard</div>
+        <ul className="mt-4 space-y-0.5">
+          {mainItems.map((item) => (
+            <NavEntry key={item.path} item={item} />
+          ))}
+        </ul>
+        {/* Bottom-pinned entries (Settings) below a divider. */}
+        <ul className="mt-auto space-y-0.5 border-t border-zinc-800 pt-2">
+          {bottomItems.map((item) => (
+            <li key={item.path}>
+              <NavLink to={item.path} className={({ isActive }) => rowClass(isActive)}>
+                <span className="flex w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
+                  <GearIcon />
+                </span>
+                <span className="truncate">{item.label}</span>
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <ResizeHandle
+        dragging={dragging}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onDoubleClick={() => setWidth(DEFAULT_WIDTH)}
+      />
+    </div>
   );
 }

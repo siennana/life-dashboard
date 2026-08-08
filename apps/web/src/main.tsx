@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import App from "./App";
+import { IndexRoute } from "./components/MobileNav";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ALL_NAV_ITEMS } from "./nav";
 import { Bank } from "./pages/Bank";
@@ -31,7 +32,8 @@ createRoot(document.getElementById("root")!).render(
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<App />}>
-              <Route index element={<Navigate to="/home" replace />} />
+              {/* Mobile: full-screen nav menu. Desktop: redirect to /home. */}
+              <Route index element={<IndexRoute />} />
               <Route path="home" element={<Home />} />
               <Route path="todos" element={<Todos />} />
               <Route path="calendar" element={<CalendarPage />} />
