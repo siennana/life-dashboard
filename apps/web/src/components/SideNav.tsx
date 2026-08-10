@@ -9,11 +9,14 @@ import {
   ExerciseIcon,
   FolderIcon,
   GearIcon,
+  HashtagIcon,
   HomeIcon,
   TodoIcon,
   TrendingUpIcon,
   WalletIcon,
+  XIcon,
 } from "./icons";
+import { TagEditor } from "./TagEditor";
 
 // Page icon per nav path (nav.ts stays plain data — no React imports there).
 // Convention (subject to change): an icon marks a page that is a *report with
@@ -33,6 +36,7 @@ export const NAV_ICONS: Record<string, (props: { className?: string }) => React.
   "/reading": BookIcon,
   "/projects": FolderIcon,
   "/settings": GearIcon,
+  "/tags": HashtagIcon,
 };
 
 // The icon column: fixed-size slot so labels align whether or not a row has
@@ -185,6 +189,9 @@ export function SideNav() {
 
   const [width, setWidth] = useState(readStoredWidth);
   const [dragging, setDragging] = useState(false);
+  // The Edit Tags secondary drawer, sliding out beside the sidebar. Desktop
+  // only — on mobile the same editor is the /tags page.
+  const [tagsOpen, setTagsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   function onPointerDown(e: React.PointerEvent) {
@@ -233,8 +240,22 @@ export function SideNav() {
             <NavEntry key={item.path} item={item} />
           ))}
         </ul>
-        {/* Bottom-pinned entries (Settings) below a divider. */}
+        {/* Bottom-pinned entries below a divider: Edit Tags (opens the
+            secondary drawer), then Settings. */}
         <ul className="mt-auto space-y-0.5 border-t border-zinc-800 pt-2">
+          <li>
+            <button
+              type="button"
+              onClick={() => setTagsOpen((v) => !v)}
+              aria-expanded={tagsOpen}
+              className={`w-full text-left ${rowClass(tagsOpen)}`}
+            >
+              <span className="flex w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
+                <HashtagIcon className="h-3.5 w-3.5" />
+              </span>
+              <span className="truncate">Edit Tags</span>
+            </button>
+          </li>
           {bottomItems.map((item) => (
             <li key={item.path}>
               <NavLink to={item.path} className={({ isActive }) => rowClass(isActive)}>
@@ -247,6 +268,27 @@ export function SideNav() {
           ))}
         </ul>
       </nav>
+      {tagsOpen && (
+        <div className="absolute inset-y-0 left-full z-20 w-72 overflow-y-auto border-r border-zinc-800 bg-zinc-900 p-3 shadow-2xl">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
+              <HashtagIcon className="h-3.5 w-3.5 text-zinc-400" />
+              Edit Tags
+            </h2>
+            <button
+              type="button"
+              onClick={() => setTagsOpen(false)}
+              aria-label="Close tag editor"
+              className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+            >
+              <XIcon className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="mt-3">
+            <TagEditor />
+          </div>
+        </div>
+      )}
       <ResizeHandle
         dragging={dragging}
         onPointerDown={onPointerDown}

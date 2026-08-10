@@ -63,6 +63,10 @@ export function MobileNavMenu() {
         ))}
       </ul>
       <ul className="mt-4 space-y-1 border-t border-zinc-800 pt-3">
+        {/* Tag editing is a page on mobile (desktop uses the sidebar drawer). */}
+        <li>
+          <MenuRow item={{ path: "/tags", label: "Edit Tags" }} />
+        </li>
         {bottomItems.map((item) => (
           <li key={item.path}>
             <MenuRow item={item} />

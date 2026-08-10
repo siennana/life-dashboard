@@ -22,6 +22,27 @@
       "when": 1786131040121,
       "tag": "0002_careless_may_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786332624763,
+      "tag": "0003_young_lady_bullseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786334807784,
+      "tag": "0004_wooden_thanos",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786371631991,
+      "tag": "0005_daily_forge",
+      "breakpoints": true
     }
   ]
 }

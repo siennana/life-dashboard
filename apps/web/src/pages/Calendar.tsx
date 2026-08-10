@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCalendarLastUpdated, getCashflow, getWeather, togglePeriodDay } from "../api";
+import { useTags } from "../lib/tags";
 import type { CashflowDay } from "@life/shared";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
 import { BloodDropIcon, ExerciseIcon, FunnelIcon } from "../components/icons";
@@ -164,6 +165,9 @@ function CashflowBadge({ day, covered }: { day: CashflowDay | undefined; covered
   const parts = [
     day && day.spend > 0 ? `Spent $${Math.round(day.spend).toLocaleString()}` : null,
     day && day.income > 0 ? `Income $${Math.round(day.income).toLocaleString()}` : null,
+    day && day.recurring > 0
+      ? `$${Math.round(day.recurring).toLocaleString()} recurring excluded`
+      : null,
   ].filter(Boolean);
   const title = parts.length > 0 ? parts.join(" · ") : "No transactions";
   return (
@@ -232,7 +236,6 @@ export function CalendarPage() {
 
   const { byDay, eventsByDay, exercises, calEvents } = useDayData();
   const weather = useQuery({ queryKey: ["weather"], queryFn: () => getWeather() });
-  const cashflow = useQuery({ queryKey: ["cashflow"], queryFn: getCashflow });
   const lastUpdated = useQuery({
     queryKey: ["calendar-last-updated"],
     queryFn: getCalendarLastUpdated,
@@ -255,6 +258,34 @@ export function CalendarPage() {
   const [showCashflow, setShowCashflow] = useState(true);
   const [showHealth, setShowHealth] = useState(true);
   const [showWeather, setShowWeather] = useState(true);
+  // Cashflow section: whether confirmed recurring charges (rent, subscriptions)
+  // count in the day chips. Off by default — the calendar view is for
+  // discretionary spend, not the monthly Netflix charge.
+  const [includeRecurring, setIncludeRecurring] = useState(false);
+  // Tags excluded from the cashflow sums (their merchants' transactions are
+  // dropped server-side — ?excludeTags on the cashflow endpoint — so a
+  // merchant carrying two excluded tags isn't subtracted twice).
+  const [excludedTags, setExcludedTags] = useState<Set<number>>(new Set());
+  const tagsQuery = useTags();
+  const tagList = tagsQuery.data?.tags ?? [];
+
+  function toggleExcludedTag(id: number) {
+    setExcludedTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Keyed on the exclusion set (sorted for key stability); previous data
+  // holds the chips steady while the filtered response loads.
+  const excludedTagKey = [...excludedTags].sort((a, b) => a - b);
+  const cashflow = useQuery({
+    queryKey: ["cashflow", excludedTagKey.join(",")],
+    queryFn: () => getCashflow(excludedTagKey),
+    placeholderData: keepPreviousData,
+  });
   // The corner dumbbell marker — independent of the Events "Exercise" toggle
   // (which controls chips/dots/schedule blocks), so a day can show the marker
   // without the entries, or vice versa.
@@ -290,6 +321,8 @@ export function CalendarPage() {
     !showCashflow ||
     !showHealth ||
     !showWeather ||
+    includeRecurring ||
+    excludedTags.size > 0 ||
     hiddenCalendars.size > 0;
 
   useEffect(() => {
@@ -469,11 +502,27 @@ export function CalendarPage() {
 
   // Net cashflow per day (income − spend). Shown on any day with movement,
   // regardless of month — unlike weather, which is a current-week forecast.
+  // With the Recurring filter off (default), confirmed-series charges are
+  // subtracted from each day's spend/net here — the API sends the recurring
+  // portion per day, so toggling never refetches. The adjusted day's
+  // `recurring` field is repurposed as "amount excluded from these figures"
+  // (0 when included) for the badge tooltip.
   const cashflowByDay = useMemo(() => {
     const map = new Map<string, CashflowDay>();
-    for (const d of cashflow.data?.days ?? []) map.set(d.date, d);
+    for (const d of cashflow.data?.days ?? []) {
+      if (includeRecurring || d.recurring === 0) {
+        map.set(d.date, { ...d, recurring: 0 });
+        continue;
+      }
+      const spend = Math.round((d.spend - d.recurring) * 100) / 100;
+      map.set(d.date, {
+        ...d,
+        spend,
+        net: Math.round((d.income - spend) * 100) / 100,
+      });
+    }
     return map;
-  }, [cashflow.data]);
+  }, [cashflow.data, includeRecurring]);
   // A day is "covered" (eligible for a $0) only from the first transaction
   // through today — days are returned oldest-first, so [0] is the earliest.
   const firstCashDate = cashflow.data?.days[0]?.date ?? null;
@@ -859,6 +908,45 @@ export function CalendarPage() {
                   checked={showWeather}
                   onChange={() => setShowWeather((v) => !v)}
                 />
+              </div>
+              <div className="mt-2 px-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                Cashflow
+              </div>
+              <div className="mt-1">
+                <TriCheckbox
+                  label="Recurring"
+                  checked={includeRecurring}
+                  onChange={() => setIncludeRecurring((v) => !v)}
+                />
+                {/* Unchecking a tag drops its merchants' transactions from the
+                    day sums. Tri-state parent mirrors the CalDAV row. */}
+                {tagList.length > 0 && (
+                  <>
+                    <TriCheckbox
+                      label="Tags"
+                      checked={excludedTags.size === 0}
+                      indeterminate={excludedTags.size > 0 && excludedTags.size < tagList.length}
+                      onChange={() =>
+                        setExcludedTags(
+                          excludedTags.size === 0
+                            ? new Set(tagList.map((t) => t.id))
+                            : new Set(),
+                        )
+                      }
+                    />
+                    <div className="ml-2 space-y-0.5 border-l border-zinc-700/60 pl-2">
+                      {tagList.map((tag) => (
+                        <TriCheckbox
+                          key={tag.id}
+                          label={`#${tag.name}`}
+                          small
+                          checked={!excludedTags.has(tag.id)}
+                          onChange={() => toggleExcludedTag(tag.id)}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}

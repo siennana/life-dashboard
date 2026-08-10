@@ -18,9 +18,13 @@ import type {
   PeriodToggleResult,
   PlaidLinkMode,
   PortfolioResponse,
+  RecurringSeriesInput,
   SpendingDashboard,
   StatusResponse,
   StockAccount,
+  Tag,
+  TagsResponse,
+  TagUpdateInput,
   UiSettings,
   UploadResponse,
   WakatimeResponse,
@@ -237,7 +241,12 @@ export const getCalendarLastUpdated = () =>
 export const getSpending = (month?: string) =>
   apiFetch<SpendingDashboard>(`/api/finance/spending${month ? `?month=${month}` : ""}`);
 
-export const getCashflow = () => apiFetch<CashflowResponse>("/api/finance/cashflow");
+// excludeTags: tag ids whose merchants are dropped from the day sums (the
+// calendar filter's Cashflow > Tags checkboxes).
+export const getCashflow = (excludeTags: number[] = []) =>
+  apiFetch<CashflowResponse>(
+    `/api/finance/cashflow${excludeTags.length > 0 ? `?excludeTags=${excludeTags.join(",")}` : ""}`,
+  );
 
 export const getDayTransactions = (date: string) =>
   apiFetch<DayTransactionsResponse>(`/api/finance/transactions/${date}`);
@@ -254,6 +263,52 @@ async function apiPost<T>(path: string, body: object): Promise<T> {
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json() as Promise<T>;
 }
+
+// Confirm/dismiss a recurring-charge suggestion; delete = restore to suggested.
+export const setRecurringSeries = (input: RecurringSeriesInput) =>
+  apiPost<{ id: number; status: string }>("/api/recurring", input);
+
+export const deleteRecurringSeries = (id: number) => apiDelete(`/api/recurring/${id}`);
+
+// Edit a confirmed series' expected end date (null = indefinite).
+export async function updateRecurringExpiration(
+  id: number,
+  expiresOn: string | null,
+): Promise<{ id: number; expiresOn: string | null }> {
+  const res = await fetch(`/api/recurring/${id}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ expiresOn }),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<{ id: number; expiresOn: string | null }>;
+}
+
+// ---- Tags (Edit Tags drawer + Bank row menus) ------------------------------
+export const getTags = () => apiFetch<TagsResponse>("/api/tags");
+
+export const createTag = (name: string) => apiPost<Tag>("/api/tags", { name });
+
+export async function updateTag(id: number, patch: TagUpdateInput): Promise<Tag> {
+  const res = await fetch(`/api/tags/${id}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<Tag>;
+}
+
+export const deleteTag = (id: number) => apiDelete(`/api/tags/${id}`);
+
+export const toggleTagMerchant = (tagId: number, merchant: string) =>
+  apiPost<{ tagged: boolean }>(`/api/tags/${tagId}/toggle`, { merchant });
 
 export const createPlaidLinkToken = (mode: PlaidLinkMode = "transactions") =>
   apiPost<{ link_token: string }>("/api/plaid/link-token", { mode });

@@ -373,6 +373,13 @@ export const spendingTransactionSchema = z.object({
   category: z.string().nullable(),
   pending: z.boolean(),
   accountId: z.string().nullable(),
+  // The confirmed recurring series this charge matches, if any — the
+  // transaction row menu's Recurring toggle keys off it (null = not recurring;
+  // toggling off deletes this series).
+  recurringSeriesId: z.number().nullable(),
+  // Normalized merchant key — the row menu's Tags section looks up this
+  // merchant's tag state with it (client can't normalize; that's server logic).
+  merchantKey: z.string(),
 });
 export type SpendingTransaction = z.infer<typeof spendingTransactionSchema>;
 
@@ -392,16 +399,135 @@ export const spendingAccountSchema = z.object({
 });
 export type SpendingAccount = z.infer<typeof spendingAccountSchema>;
 
+export const recurringFrequencySchema = z.enum(["weekly", "biweekly", "monthly", "yearly"]);
+export type RecurringFrequency = z.infer<typeof recurringFrequencySchema>;
+
+// A detected-but-unconfirmed recurring candidate (the widget's Suggested list).
 export const recurringChargeSchema = z.object({
   name: z.string(),
+  merchantKey: z.string(), // for tag lookup + the row's tag context menu
   avgAmount: z.number(),
-  frequency: z.enum(["weekly", "biweekly", "monthly", "yearly"]),
+  frequency: recurringFrequencySchema,
   count: z.number(),
   lastDate: z.string(), // YYYY-MM-DD
   nextExpected: z.string(), // YYYY-MM-DD
   active: z.boolean(), // false once a due charge stopped showing up
 });
 export type RecurringCharge = z.infer<typeof recurringChargeSchema>;
+
+// A confirmed series (recurring_series row) with live stats recomputed from
+// transaction history each request — matched by merchant + amount, so counts
+// survive Plaid re-links.
+export const confirmedRecurringSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  merchantKey: z.string(), // for tag lookup + the row's tag context menu
+  amount: z.number(), // expected charge (fixed at confirm time)
+  frequency: recurringFrequencySchema,
+  count: z.number(), // matching charges seen in history
+  lastDate: z.string().nullable(), // last matching charge, null if none matched
+  nextExpected: z.string().nullable(),
+  active: z.boolean(), // false once overdue by >2 cycles (or never matched)
+  expiresOn: z.string().nullable(), // expected end date; null = indefinite
+  // A matched charge landed after expiresOn — still billing past when it
+  // should have stopped. Drives the red warning in the widget.
+  expired: z.boolean(),
+});
+export type ConfirmedRecurring = z.infer<typeof confirmedRecurringSchema>;
+
+// Edit a confirmed series' expiration (PATCH /api/recurring/:id).
+export const recurringExpirationInputSchema = z.object({
+  expiresOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
+});
+export type RecurringExpirationInput = z.infer<typeof recurringExpirationInputSchema>;
+
+// Confirmed-series totals. `yearlyTotal` is annual-frequency charges only;
+// `annualizedTotal` is the per-year cost of everything (weekly x52, biweekly
+// x26, monthly x12, yearly x1). Inactive (lapsed) series are excluded.
+export const recurringTotalsSchema = z.object({
+  monthlyTotal: z.number(),
+  monthlyCount: z.number(),
+  yearlyTotal: z.number(),
+  yearlyCount: z.number(),
+  annualizedTotal: z.number(),
+});
+export type RecurringTotals = z.infer<typeof recurringTotalsSchema>;
+
+export const recurringSectionSchema = z.object({
+  suggested: z.array(recurringChargeSchema),
+  confirmed: z.array(confirmedRecurringSchema),
+  // Dismissed series, so a mis-click can be undone (restore = delete the row).
+  dismissed: z.array(
+    z.object({ id: z.number(), name: z.string(), frequency: recurringFrequencySchema }),
+  ),
+  totals: recurringTotalsSchema,
+});
+export type RecurringSection = z.infer<typeof recurringSectionSchema>;
+
+// ---- Tags ------------------------------------------------------------------
+// User-defined labels applied to merchants (tag_rules keyed on the normalized
+// merchant key). Colors are token names so the web can map them to themed
+// wash/text classes statically.
+export const TAG_COLORS = [
+  "zinc",
+  "red",
+  "amber",
+  "emerald",
+  "sky",
+  "blue",
+  "violet",
+  "pink",
+] as const;
+export const tagColorSchema = z.enum(TAG_COLORS);
+export type TagColor = z.infer<typeof tagColorSchema>;
+
+export const tagSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  color: tagColorSchema,
+});
+export type Tag = z.infer<typeof tagSchema>;
+
+export const tagsResponseSchema = z.object({ tags: z.array(tagSchema) });
+export type TagsResponse = z.infer<typeof tagsResponseSchema>;
+
+export const tagCreateInputSchema = z.object({
+  name: z.string().trim().min(1).max(40),
+});
+export type TagCreateInput = z.infer<typeof tagCreateInputSchema>;
+
+export const tagUpdateInputSchema = z.object({
+  name: z.string().trim().min(1).max(40).optional(),
+  color: tagColorSchema.optional(),
+});
+export type TagUpdateInput = z.infer<typeof tagUpdateInputSchema>;
+
+// Flip a tag on/off for a merchant (server normalizes the merchant name).
+export const tagToggleInputSchema = z.object({
+  merchant: z.string().trim().min(1),
+});
+export type TagToggleInput = z.infer<typeof tagToggleInputSchema>;
+
+// A merchant with the tags applied to it (the Bank page's Tagged merchants
+// widget + row-menu checkbox state, looked up by transaction merchantKey).
+export const taggedMerchantSchema = z.object({
+  merchant: z.string(),
+  merchantKey: z.string(),
+  tags: z.array(tagSchema),
+});
+export type TaggedMerchant = z.infer<typeof taggedMerchantSchema>;
+
+// Confirm or dismiss a suggestion (upserts on the normalized merchant key).
+export const recurringSeriesInputSchema = z.object({
+  name: z.string().min(1),
+  amount: z.number().positive(),
+  frequency: recurringFrequencySchema,
+  status: z.enum(["confirmed", "dismissed"]),
+});
+export type RecurringSeriesInput = z.infer<typeof recurringSeriesInputSchema>;
 
 export const spendingDashboardSchema = z.object({
   configured: z.boolean(),
@@ -422,7 +548,8 @@ export const spendingDashboardSchema = z.object({
   categories: z.array(z.object({ category: z.string(), spend: z.number(), count: z.number() })),
   accounts: z.array(spendingAccountSchema),
   merchants: z.array(z.object({ name: z.string(), spend: z.number(), count: z.number() })),
-  recurring: z.array(recurringChargeSchema),
+  recurring: recurringSectionSchema,
+  tagged: z.array(taggedMerchantSchema), // merchants with tags, sorted by name
   transactions: z.array(spendingTransactionSchema), // selected month, newest first
 });
 export type SpendingDashboard = z.infer<typeof spendingDashboardSchema>;
@@ -458,6 +585,9 @@ export const cashflowDaySchema = z.object({
   net: z.number(),
   spend: z.number(),
   income: z.number(),
+  // Portion of `spend` matched to confirmed recurring series — the calendar's
+  // Recurring filter subtracts it client-side, no refetch.
+  recurring: z.number(),
 });
 export type CashflowDay = z.infer<typeof cashflowDaySchema>;
 

@@ -12,7 +12,14 @@ import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
 import { listPeriodDays, togglePeriodDay } from "./period";
 import { getDayLog, getLastUpdated, saveDayLog } from "./calendarDay";
-import { buildDailyCashflow, buildDayTransactions, buildSpendingDashboard } from "./spending";
+import {
+  buildDailyCashflow,
+  buildDayTransactions,
+  buildSpendingDashboard,
+  deleteRecurringSeries,
+  updateRecurringSeriesExpiration,
+  upsertRecurringSeries,
+} from "./spending";
 import {
   createLinkToken,
   exchangePublicToken,
@@ -23,14 +30,20 @@ import {
 import { syncGithub } from "./connectors/github";
 import { syncWakatime } from "./connectors/wakatime";
 import { getUiSettings, saveUiSettings } from "./settings";
+import { createTag, deleteTag, listTags, toggleTagMerchant, updateTag } from "./tags";
 import {
   bookInputSchema,
   exerciseInputSchema,
   periodToggleInputSchema,
   plaidExchangeInputSchema,
   plaidLinkTokenInputSchema,
+  recurringExpirationInputSchema,
+  recurringSeriesInputSchema,
   saveDayLogInputSchema,
   stockAccountSchema,
+  tagCreateInputSchema,
+  tagToggleInputSchema,
+  tagUpdateInputSchema,
   uiSettingsSchema,
   type SyncProcess,
   type SyncProcessStatus,
@@ -400,9 +413,88 @@ app.get("/api/finance/spending", async (req, reply) => {
 });
 
 // Net cashflow per day (income − spend), for the per-day figure on the calendar.
-app.get("/api/finance/cashflow", async (_req, reply) => {
+// ?excludeTags=1,2 drops transactions from merchants carrying those tags.
+app.get("/api/finance/cashflow", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
-  return buildDailyCashflow(db);
+  const raw = (req.query as { excludeTags?: string }).excludeTags ?? "";
+  const excludeTagIds = raw
+    .split(",")
+    .map((s) => Number(s))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  return buildDailyCashflow(db, excludeTagIds);
+});
+
+// Confirm or dismiss a recurring-charge suggestion (upsert on merchant key).
+// Series are content patterns (merchant + amount + cadence), never tied to
+// transaction ids, so they survive Plaid re-links. Logic in spending.ts.
+app.post("/api/recurring", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const input = recurringSeriesInputSchema.parse(req.body);
+  const row = await upsertRecurringSeries(db, input);
+  return { id: row.id, status: row.status };
+});
+
+// Edit a confirmed series' expiration date (null = indefinite).
+app.patch("/api/recurring/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid series id" });
+  const input = recurringExpirationInputSchema.parse(req.body);
+  const row = await updateRecurringSeriesExpiration(db, id, input.expiresOn);
+  if (!row) return reply.code(404).send({ error: "series not found" });
+  return { id: row.id, expiresOn: row.expiresOn };
+});
+
+// Un-confirm / restore-from-dismissed: the merchant becomes a plain
+// suggestion candidate again.
+app.delete("/api/recurring/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid series id" });
+  const deleted = await deleteRecurringSeries(db, id);
+  if (!deleted) return reply.code(404).send({ error: "series not found" });
+  return { deleted: true };
+});
+
+// ---- Tags: user-defined merchant labels (logic in tags.ts) -----------------
+app.get("/api/tags", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return { tags: await listTags(db) };
+});
+
+app.post("/api/tags", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const input = tagCreateInputSchema.parse(req.body);
+  return createTag(db, input.name);
+});
+
+app.patch("/api/tags/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid tag id" });
+  const row = await updateTag(db, id, tagUpdateInputSchema.parse(req.body));
+  if (!row) return reply.code(404).send({ error: "tag not found" });
+  return row;
+});
+
+app.delete("/api/tags/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid tag id" });
+  const deleted = await deleteTag(db, id);
+  if (!deleted) return reply.code(404).send({ error: "tag not found" });
+  return { deleted: true };
+});
+
+// Flip a tag on/off for a merchant (the transaction row menu's checkboxes).
+app.post("/api/tags/:id/toggle", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid tag id" });
+  const input = tagToggleInputSchema.parse(req.body);
+  const result = await toggleTagMerchant(db, id, input.merchant);
+  if (!result) return reply.code(404).send({ error: "tag not found" });
+  return result;
 });
 
 // All plaid transactions on one day, for the calendar day-detail list.

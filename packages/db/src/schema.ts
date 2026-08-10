@@ -1,5 +1,6 @@
 import {
   date,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -52,6 +53,65 @@ export const settings = pgTable("settings", {
   value: jsonb("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Confirmed/dismissed recurring-charge series (rent, subscriptions). Like
+// `settings`, a deliberate exception to the generic schema: a series is a
+// *pattern* (merchant + amount + cadence), not an event — and it must be keyed
+// on content, not transaction ids, so it survives Plaid re-links wiping and
+// re-issuing every transaction row. Suggestions are never stored; they're
+// re-detected from history at read time, and a row here either promotes one
+// (confirmed) or hides it (dismissed).
+export const recurringSeries = pgTable(
+  "recurring_series",
+  {
+    id: serial("id").primaryKey(),
+    merchant: text("merchant").notNull(), // display name ("Netflix")
+    merchantKey: text("merchant_key").notNull(), // normalized grouping key
+    amount: numeric("amount").notNull(), // expected charge; matches within ±25%
+    frequency: text("frequency").notNull(), // weekly | biweekly | monthly | yearly
+    status: text("status").notNull(), // confirmed | dismissed
+    // When the series is expected to stop charging (loan payoff, planned
+    // cancellation). Null = indefinite. A matched charge dated after this
+    // flags the series in the widget.
+    expiresOn: date("expires_on"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("recurring_series_merchant_key").on(t.merchantKey)],
+);
+
+// User-defined labels (home, entertainment, cloud...) — pure data, no
+// hardcoded per-label logic anywhere. Same generic-schema exception family as
+// `settings`/`recurring_series`.
+export const tags = pgTable(
+  "tags",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    color: text("color").notNull(), // one of TAG_COLORS in @life/shared
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("tags_name").on(t.name)],
+);
+
+// Tag → merchant assignments, keyed on the normalized merchant key (content,
+// not transaction ids) so they survive Plaid re-links, and every past+future
+// charge from the merchant carries the tag. Per-transaction overrides
+// (one-off adds / rule exclusions) are a future layer — see todo.md.
+export const tagRules = pgTable(
+  "tag_rules",
+  {
+    id: serial("id").primaryKey(),
+    tagId: integer("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+    merchant: text("merchant").notNull(), // display name
+    merchantKey: text("merchant_key").notNull(), // normalized grouping key
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("tag_rules_tag_merchant").on(t.tagId, t.merchantKey)],
+);
 
 // One row per connector run — powers the sync-status widget.
 export const syncRuns = pgTable("sync_runs", {

@@ -1,10 +1,15 @@
-import { and, eq } from "drizzle-orm";
-import { events, type Db } from "@life/db";
-import type {
-  CashflowResponse,
-  DayTransactionsResponse,
-  RecurringCharge,
-  SpendingDashboard,
+import { and, eq, inArray } from "drizzle-orm";
+import { events, recurringSeries, tagRules, tags, type Db } from "@life/db";
+import {
+  TAG_COLORS,
+  type CashflowResponse,
+  type ConfirmedRecurring,
+  type DayTransactionsResponse,
+  type RecurringCharge,
+  type RecurringSection,
+  type RecurringSeriesInput,
+  type SpendingDashboard,
+  type TaggedMerchant,
 } from "@life/shared";
 
 // Internal money movement, not real spending: account-to-account transfers,
@@ -40,7 +45,7 @@ type AccountPayload = {
   creditLimit?: number | null;
 };
 
-type Tx = {
+export type Tx = {
   id: number;
   date: string; // YYYY-MM-DD
   month: string; // YYYY-MM
@@ -72,11 +77,15 @@ const BRANDS: [string, string][] = [
   ["dunkin", "Dunkin"],
 ];
 
-function normalizeMerchant(raw: string): string {
+export function normalizeMerchant(raw: string): string {
   const lower = raw.toLowerCase();
   for (const [needle, brand] of BRANDS) if (lower.includes(needle)) return brand;
   return raw;
 }
+
+// The grouping key recurring detection, series matching, and tag rules all
+// share — one key per merchant stream, so they all see the same transactions.
+export const merchantKeyOf = (name: string) => normalizeMerchant(name).toLowerCase().trim();
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const median = (xs: number[]) => {
@@ -91,12 +100,13 @@ const addDays = (date: string, days: number) =>
 
 // A transaction counts toward "spend" when money actually left for the outside
 // world. Refunds (negative, non-income, non-transfer) subtract from spend.
-const isSpend = (t: Tx) => t.amount > 0 && !(t.detailed && NON_SPEND_DETAILED.has(t.detailed));
-const isRefund = (t: Tx) =>
+export const isSpend = (t: Tx) =>
+  t.amount > 0 && !(t.detailed && NON_SPEND_DETAILED.has(t.detailed));
+export const isRefund = (t: Tx) =>
   t.amount < 0 &&
   t.category !== "INCOME" &&
   !(t.detailed ?? "").startsWith(NON_INCOME_DETAILED_PREFIX);
-const isIncome = (t: Tx) => t.amount < 0 && t.category === "INCOME";
+export const isIncome = (t: Tx) => t.amount < 0 && t.category === "INCOME";
 
 // One plaid transaction row → Tx. Shared by the spending dashboard and the
 // daily cashflow so both classify amounts identically.
@@ -128,13 +138,34 @@ async function loadTxs(db: Db): Promise<Tx[]> {
 // internal transfers / card payments excluded — same rules as the Bank page).
 // `net > 0` = money in on balance, `net < 0` = money out. Days with no real
 // movement are dropped. Powers the per-day figure on the calendar grid.
-export async function buildDailyCashflow(db: Db): Promise<CashflowResponse> {
-  const txs = await loadTxs(db);
-  const byDay = new Map<string, { spend: number; income: number }>();
+export async function buildDailyCashflow(
+  db: Db,
+  // Tag ids whose merchants are excluded from the sums (the calendar filter's
+  // Cashflow > Tags checkboxes). Server-side because merchant↔tag rules live
+  // here — and exclusion by merchant set stays correct when a merchant
+  // carries several of the excluded tags.
+  excludeTagIds: number[] = [],
+): Promise<CashflowResponse> {
+  const [allTxs, series, excludedRules] = await Promise.all([
+    loadTxs(db),
+    db.select().from(recurringSeries).where(eq(recurringSeries.status, "confirmed")),
+    excludeTagIds.length > 0
+      ? db.select().from(tagRules).where(inArray(tagRules.tagId, excludeTagIds))
+      : Promise.resolve([]),
+  ]);
+  const excludedKeys = new Set(excludedRules.map((r) => r.merchantKey));
+  const txs =
+    excludedKeys.size > 0 ? allTxs.filter((t) => !excludedKeys.has(merchantKeyOf(t.name))) : allTxs;
+  const byDay = new Map<string, { spend: number; income: number; recurring: number }>();
   for (const t of txs) {
-    const cur = byDay.get(t.date) ?? { spend: 0, income: 0 };
-    if (isSpend(t) || isRefund(t)) cur.spend += t.amount;
-    else if (isIncome(t)) cur.income += -t.amount;
+    const cur = byDay.get(t.date) ?? { spend: 0, income: 0, recurring: 0 };
+    if (isSpend(t) || isRefund(t)) {
+      cur.spend += t.amount;
+      // Confirmed-series charges split out so the calendar's Recurring filter
+      // can subtract them without a refetch.
+      if (series.some((s) => matchesSeries(t, s.merchantKey, Number(s.amount))))
+        cur.recurring += t.amount;
+    } else if (isIncome(t)) cur.income += -t.amount;
     byDay.set(t.date, cur);
   }
   const days = [...byDay.entries()]
@@ -143,6 +174,7 @@ export async function buildDailyCashflow(db: Db): Promise<CashflowResponse> {
       spend: round2(v.spend),
       income: round2(v.income),
       net: round2(v.income - v.spend),
+      recurring: round2(v.recurring),
     }))
     .filter((d) => d.spend !== 0 || d.income !== 0)
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -153,18 +185,23 @@ export async function buildDailyCashflow(db: Db): Promise<CashflowResponse> {
 // day-detail Transactions list. Raw rows — no spend/transfer filtering — so the
 // day view shows exactly what hit the accounts.
 export async function buildDayTransactions(db: Db, date: string): Promise<DayTransactionsResponse> {
-  const txs = await loadTxs(db);
+  const [txs, confirmed] = await Promise.all([
+    loadTxs(db),
+    db.select().from(recurringSeries).where(eq(recurringSeries.status, "confirmed")),
+  ]);
   const transactions = txs
     .filter((t) => t.date === date)
     .sort((a, b) => b.id - a.id)
-    .map(({ id, date, name, amount, category, pending, accountId }) => ({
-      id,
-      date,
-      name,
-      amount,
-      category,
-      pending,
-      accountId,
+    .map((t) => ({
+      id: t.id,
+      date: t.date,
+      name: t.name,
+      amount: t.amount,
+      category: t.category,
+      pending: t.pending,
+      accountId: t.accountId,
+      recurringSeriesId: seriesIdFor(t, confirmed),
+      merchantKey: merchantKeyOf(t.name),
     }));
   return { date, transactions };
 }
@@ -172,16 +209,21 @@ export async function buildDayTransactions(db: Db, date: string): Promise<DayTra
 // Fixed-cadence charges (rent, subscriptions, insurance) detected from the
 // history itself: same merchant, steady amount, steady gap. Plaid has a paid
 // endpoint for this; the DIY version is fine for one person's accounts.
-function detectRecurring(spend: Tx[], today: string): RecurringCharge[] {
+export function detectRecurring(
+  spend: Tx[],
+  today: string,
+  excludeKeys: Set<string>,
+): RecurringCharge[] {
   const byMerchant = new Map<string, Tx[]>();
   for (const t of spend) {
-    const key = normalizeMerchant(t.name).toLowerCase().trim();
+    const key = merchantKeyOf(t.name);
+    if (excludeKeys.has(key)) continue; // already confirmed or dismissed
     if (!byMerchant.has(key)) byMerchant.set(key, []);
     byMerchant.get(key)!.push(t);
   }
 
   const out: RecurringCharge[] = [];
-  for (const txs of byMerchant.values()) {
+  for (const [key, txs] of byMerchant.entries()) {
     if (txs.length < 3) continue;
     txs.sort((a, b) => a.date.localeCompare(b.date));
 
@@ -211,6 +253,7 @@ function detectRecurring(spend: Tx[], today: string): RecurringCharge[] {
     const lastDate = txs[txs.length - 1]!.date;
     out.push({
       name: normalizeMerchant(txs[txs.length - 1]!.name),
+      merchantKey: key,
       avgAmount: round2(mid),
       frequency,
       count: txs.length,
@@ -223,17 +266,188 @@ function detectRecurring(spend: Tx[], today: string): RecurringCharge[] {
   return out.sort((a, b) => b.avgAmount - a.avgAmount);
 }
 
+// ---------------------------------------------------------------------------
+// Confirmed recurring series (recurring_series rows). A series is a content
+// pattern — merchant + expected amount + cadence — so matching is by value,
+// never by transaction id: it survives pending→posted id swaps and the
+// re-link wipe. Amount must land within ±25% of the confirmed figure, which
+// is what separates the monthly Netflix charge from a one-off Netflix gift
+// card at the same merchant.
+
+const CYCLE_DAYS = { weekly: 7, biweekly: 14, monthly: 30, yearly: 365 } as const;
+const ANNUAL_MULTIPLIER = { weekly: 52, biweekly: 26, monthly: 12, yearly: 1 } as const;
+
+export type SeriesRow = typeof recurringSeries.$inferSelect;
+
+export const matchesSeries = (t: Tx, key: string, amount: number) =>
+  isSpend(t) && merchantKeyOf(t.name) === key && Math.abs(t.amount - amount) / amount <= 0.25;
+
+// The confirmed series a transaction belongs to (id, or null) — stamped on
+// every transaction the API serves so row menus can show/flip the state.
+const seriesIdFor = (t: Tx, confirmed: SeriesRow[]) =>
+  confirmed.find((s) => matchesSeries(t, s.merchantKey, Number(s.amount)))?.id ?? null;
+
+// The whole recurring block of the dashboard: fresh suggestions (minus
+// anything already confirmed/dismissed), confirmed series with live stats,
+// dismissed stubs for undo, and the frequency totals.
+export function buildRecurringSection(
+  txs: Tx[],
+  series: SeriesRow[],
+  today: string,
+): RecurringSection {
+  const confirmed: ConfirmedRecurring[] = series
+    .filter((s) => s.status === "confirmed")
+    .map((s) => {
+      const amount = Number(s.amount);
+      const matched = txs
+        .filter((t) => matchesSeries(t, s.merchantKey, amount))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      const cycle = CYCLE_DAYS[s.frequency as keyof typeof CYCLE_DAYS] ?? 30;
+      const lastDate = matched.length > 0 ? matched[matched.length - 1]!.date : null;
+      return {
+        id: s.id,
+        name: s.merchant,
+        merchantKey: s.merchantKey,
+        amount: round2(amount),
+        frequency: s.frequency as ConfirmedRecurring["frequency"],
+        count: matched.length,
+        lastDate,
+        nextExpected: lastDate ? addDays(lastDate, cycle) : null,
+        active: lastDate != null && daysBetween(lastDate, today) <= cycle * 2,
+        expiresOn: s.expiresOn,
+        // Still billing past the expected end: a matched charge after expiresOn.
+        expired: s.expiresOn != null && lastDate != null && lastDate > s.expiresOn,
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+
+  const totals = confirmed
+    .filter((c) => c.active)
+    .reduce(
+      (acc, c) => {
+        if (c.frequency === "monthly") {
+          acc.monthlyTotal += c.amount;
+          acc.monthlyCount += 1;
+        } else if (c.frequency === "yearly") {
+          acc.yearlyTotal += c.amount;
+          acc.yearlyCount += 1;
+        }
+        acc.annualizedTotal += c.amount * ANNUAL_MULTIPLIER[c.frequency];
+        return acc;
+      },
+      { monthlyTotal: 0, monthlyCount: 0, yearlyTotal: 0, yearlyCount: 0, annualizedTotal: 0 },
+    );
+  totals.monthlyTotal = round2(totals.monthlyTotal);
+  totals.yearlyTotal = round2(totals.yearlyTotal);
+  totals.annualizedTotal = round2(totals.annualizedTotal);
+
+  return {
+    suggested: detectRecurring(
+      txs.filter(isSpend),
+      today,
+      new Set(series.map((s) => s.merchantKey)),
+    ),
+    confirmed,
+    dismissed: series
+      .filter((s) => s.status === "dismissed")
+      .map((s) => ({
+        id: s.id,
+        name: s.merchant,
+        frequency: s.frequency as ConfirmedRecurring["frequency"],
+      })),
+    totals,
+  };
+}
+
+// Confirm or dismiss — upsert on the merchant key, so re-confirming a
+// dismissed merchant (or vice versa) flips the one row instead of stacking.
+export async function upsertRecurringSeries(db: Db, input: RecurringSeriesInput) {
+  // Normalize the display name too — marking a raw statement descriptor from
+  // the transaction list should store the brand, not "Chidoordash.comca".
+  const merchant = normalizeMerchant(input.name.trim());
+  const values = {
+    merchant,
+    merchantKey: merchantKeyOf(merchant),
+    amount: String(input.amount),
+    frequency: input.frequency,
+    status: input.status,
+  };
+  const rows = await db
+    .insert(recurringSeries)
+    .values(values)
+    .onConflictDoUpdate({
+      target: recurringSeries.merchantKey,
+      set: { ...values, updatedAt: new Date() },
+    })
+    .returning();
+  return rows[0]!;
+}
+
+// Edit a series' expected end date (null = indefinite again).
+export async function updateRecurringSeriesExpiration(
+  db: Db,
+  id: number,
+  expiresOn: string | null,
+) {
+  const rows = await db
+    .update(recurringSeries)
+    .set({ expiresOn, updatedAt: new Date() })
+    .where(eq(recurringSeries.id, id))
+    .returning();
+  return rows[0] ?? null;
+}
+
+// Remove a series row — the merchant goes back to plain suggestion-eligible.
+export async function deleteRecurringSeries(db: Db, id: number): Promise<boolean> {
+  const rows = await db.delete(recurringSeries).where(eq(recurringSeries.id, id)).returning();
+  return rows.length > 0;
+}
+
 export async function buildSpendingDashboard(
   db: Db,
   opts: { configured: boolean; linked: boolean; month?: string },
 ): Promise<SpendingDashboard> {
-  const [txs, accountRows] = await Promise.all([
+  const [txs, accountRows, seriesRows, tagRows, ruleRows] = await Promise.all([
     loadTxs(db),
     db
       .select()
       .from(events)
       .where(and(eq(events.source, "plaid"), eq(events.type, "account"))),
+    db.select().from(recurringSeries),
+    db.select().from(tags),
+    db.select().from(tagRules),
   ]);
+  const confirmedRows = seriesRows.filter((s) => s.status === "confirmed");
+
+  // Merchants with tags applied (rules joined to tags), for the Tagged
+  // merchants widget + the row menu's checkbox state (keyed by merchantKey).
+  const tagById = new Map(
+    tagRows.map((t) => [
+      t.id,
+      {
+        id: t.id,
+        name: t.name,
+        color: ((TAG_COLORS as readonly string[]).includes(t.color)
+          ? t.color
+          : "zinc") as TaggedMerchant["tags"][number]["color"],
+      },
+    ]),
+  );
+  const taggedByKey = new Map<string, TaggedMerchant>();
+  for (const rule of ruleRows) {
+    const tag = tagById.get(rule.tagId);
+    if (!tag) continue;
+    const cur = taggedByKey.get(rule.merchantKey) ?? {
+      merchant: rule.merchant,
+      merchantKey: rule.merchantKey,
+      tags: [],
+    };
+    cur.tags.push(tag);
+    taggedByKey.set(rule.merchantKey, cur);
+  }
+  const tagged = [...taggedByKey.values()]
+    .map((m) => ({ ...m, tags: m.tags.sort((a, b) => a.name.localeCompare(b.name)) }))
+    .sort((a, b) => a.merchant.localeCompare(b.merchant));
 
   const today = new Date().toISOString().slice(0, 10);
   const currentMonth = today.slice(0, 7);
@@ -351,17 +565,20 @@ export async function buildSpendingDashboard(
     categories,
     accounts,
     merchants,
-    recurring: detectRecurring(txs.filter(isSpend), today),
+    recurring: buildRecurringSection(txs, seriesRows, today),
+    tagged,
     transactions: inMonth
       .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
-      .map(({ id, date, name, amount, category, pending, accountId }) => ({
-        id,
-        date,
-        name,
-        amount,
-        category,
-        pending,
-        accountId,
+      .map((t) => ({
+        id: t.id,
+        date: t.date,
+        name: t.name,
+        amount: t.amount,
+        category: t.category,
+        pending: t.pending,
+        accountId: t.accountId,
+        recurringSeriesId: seriesIdFor(t, confirmedRows),
+        merchantKey: merchantKeyOf(t.name),
       })),
   };
 }

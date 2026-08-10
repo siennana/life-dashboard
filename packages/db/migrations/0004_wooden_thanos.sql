@@ -1,0 +1,1 @@
+ALTER TABLE "recurring_series" ADD COLUMN "expires_on" date;

@@ -17,6 +17,7 @@ import { Projects } from "./pages/Projects";
 import { Reading } from "./pages/Reading";
 import { Settings } from "./pages/Settings";
 import { Stocks, StocksIndexRedirect } from "./pages/Stocks";
+import { TagsPage } from "./pages/Tags";
 import { Todos } from "./pages/Todos";
 // Selectable fonts (Settings > Style), bundled locally — no CDN.
 import "@fontsource-variable/inter";
@@ -49,6 +50,9 @@ createRoot(document.getElementById("root")!).render(
               <Route path="settings" element={<Settings />} />
               {/* Hidden utility page for one-time Plaid bank linking. */}
               <Route path="plaid-link" element={<PlaidLink />} />
+              {/* Tag editor page — the mobile menu links here; desktop uses
+                  the sidebar's Edit Tags drawer instead. */}
+              <Route path="tags" element={<TagsPage />} />
               {ALL_NAV_ITEMS.filter((item) => !item.implemented).map((item) => (
                 <Route
                   key={item.path}
