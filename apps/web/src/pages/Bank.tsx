@@ -26,7 +26,7 @@ import {
 } from "../components/icons";
 import { quietBtnClass } from "../lib/controls";
 import { money, PlaidLinkStatus } from "../lib/finance";
-import { TAG_DOT_CLASSES, TAG_TEXT_CLASSES, TagPill, useTags } from "../lib/tags";
+import { TAG_DOT_CLASSES, TAG_HEX, TAG_TEXT_CLASSES, TagPill, useTags } from "../lib/tags";
 
 // Spending dashboard (Plaid). Chart color system: spend is one measure, so
 // every chart uses a single accent (slot-1 blue #3987e5, validated ≥3:1 on the
@@ -108,17 +108,19 @@ function TipBox({ tip }: { tip: Tip }) {
 // Track an element's rendered width so charts can use real pixels as their
 // viewBox width — fixed viewBox charts scale their text down with the card
 // (unreadable at half width in the side-by-side layout). 1 unit = 1 CSS px.
+// Callback-ref based so it also works for charts that mount conditionally
+// (Tag trend renders only once tags are picked — a mount-time effect never
+// saw its element and left the chart scaled up huge).
 function useMeasuredWidth<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
+  const [el, setEl] = useState<T | null>(null);
   const [width, setWidth] = useState(0);
   useEffect(() => {
-    const el = ref.current;
     if (!el) return;
     const ro = new ResizeObserver((entries) => setWidth(entries[0]!.contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
-  return { ref, width };
+  }, [el]);
+  return { ref: setEl, width };
 }
 
 // --- Monthly trend: columns, selected month in accent, others gray. ---------
@@ -302,6 +304,200 @@ function DailyChart({ daily, month }: { daily: SpendingDashboard["daily"]; month
         )}
       </svg>
     </div>
+  );
+}
+
+// --- Tag trend: stacked monthly bars for hand-picked tags. ------------------
+// Each monitored tag is one stacked segment in its own tag color (categorical
+// series with user-assigned hues — the one chart here that's legitimately
+// multi-hue). Selection starts empty and persists per machine.
+const MONITORED_TAGS_KEY = "bank.monitoredTags";
+
+function readMonitoredTags(): number[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MONITORED_TAGS_KEY) ?? "[]") as unknown;
+    return Array.isArray(raw) ? raw.filter((x): x is number => typeof x === "number") : [];
+  } catch {
+    return [];
+  }
+}
+
+function TagTrendCard({ d }: { d: SpendingDashboard }) {
+  const tagsQuery = useTags();
+  const allTags = tagsQuery.data?.tags ?? [];
+  const [monitored, setMonitored] = useState<number[]>(readMonitoredTags);
+  const [open, setOpen] = useState(false);
+  // Two containers, two refs: the filter dropdown (outside-click closing)
+  // and the chart box (tooltip coordinate space) — sharing one ref made
+  // every dropdown click read as "outside" and close the menu.
+  const filterRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [tip, setTip] = useState<Tip>(null);
+  const { ref: chartRef, width: measured } = useMeasuredWidth<HTMLDivElement>();
+
+  useEffect(() => {
+    localStorage.setItem(MONITORED_TAGS_KEY, JSON.stringify(monitored));
+  }, [monitored]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (filterRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  const toggle = (id: number) =>
+    setMonitored((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  // Tag order follows the tag list (alphabetical) so stack order is stable.
+  const series = allTags.filter((t) => monitored.includes(t.id));
+  const sumsFor = (m: SpendingDashboard["trend"][number]) =>
+    series.map((tag) => ({
+      tag,
+      // Negative (net-refund) months render as no segment; tooltip is exact.
+      value: m.tagSpend.find((s) => s.tagId === tag.id)?.spend ?? 0,
+    }));
+
+  const W = Math.max(measured, 280);
+  const H = 170;
+  const PAD_L = 42;
+  const PAD_B = 22;
+  const PAD_T = 12;
+  const plotW = W - PAD_L - 8;
+  const plotH = H - PAD_T - PAD_B;
+  // Grouped (side-by-side) bars, so the scale is the largest single tag-month.
+  const max = Math.max(...d.trend.flatMap((m) => sumsFor(m).map((x) => Math.max(x.value, 0))), 1);
+  const ticks = niceTicks(max);
+  const top = ticks[ticks.length - 1]!;
+  const slot = plotW / Math.max(d.trend.length, 1);
+  // Each month's group splits the slot between the monitored tags.
+  const groupW = Math.min(slot * 0.8, series.length * 14);
+  const eachW = groupW / Math.max(series.length, 1);
+  const barW = Math.max(eachW - 2, 2);
+
+  function showTip(e: React.PointerEvent, lines: [string, string]) {
+    const rect = boxRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTip({ x: e.clientX - rect.left, y: e.clientY - rect.top - 6, lines });
+  }
+
+  return (
+    <Card
+      title="Tag trend"
+      right={
+        <div ref={filterRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-label="Choose monitored tags"
+            aria-expanded={open}
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300"
+          >
+            <FunnelIcon className="h-3.5 w-3.5" />
+            Filter
+            {monitored.length > 0 && (
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+            )}
+          </button>
+          {open && (
+            <div className="absolute right-0 top-full z-30 mt-1 w-56 rounded-lg border border-zinc-700 bg-zinc-800 p-2 shadow-xl">
+              <div className="px-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                Monitored tags
+              </div>
+              <div className="mt-1 max-h-56 overflow-y-auto">
+                {allTags.map((tag) => (
+                  <label
+                    key={tag.id}
+                    className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 hover:bg-zinc-700/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={monitored.includes(tag.id)}
+                      onChange={() => toggle(tag.id)}
+                      className="h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-zinc-600 bg-zinc-900 text-blue-500 focus:ring-0 focus:ring-offset-0"
+                    />
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${TAG_DOT_CLASSES[tag.color]}`} />
+                    <span className="min-w-0 flex-1 truncate text-sm text-zinc-200">{tag.name}</span>
+                  </label>
+                ))}
+                {allTags.length === 0 && (
+                  <p className="px-1 py-1 text-xs text-zinc-500">No tags yet — Edit Tags in the sidebar.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      }
+    >
+      {series.length === 0 ? (
+        <p className="mt-3 text-sm text-zinc-500">
+          Nothing monitored yet — pick tags with the Filter button to chart their monthly spend.
+        </p>
+      ) : (
+        <>
+          <div ref={boxRef} className="relative">
+            <TipBox tip={tip} />
+            <div ref={chartRef}>
+              <svg viewBox={`0 0 ${W} ${H}`} className="mt-3 w-full" role="img" aria-label="Monthly spend per monitored tag">
+                {ticks.map((t) => {
+                  const y = PAD_T + plotH * (1 - t / top);
+                  return (
+                    <g key={t}>
+                      <line x1={PAD_L} x2={W - 8} y1={y} y2={y} stroke={GRID} strokeWidth={1} />
+                      <text x={PAD_L - 6} y={y + 3.5} textAnchor="end" fontSize={10} fill={INK_MUTED}>
+                        {compact(t)}
+                      </text>
+                    </g>
+                  );
+                })}
+                {d.trend.map((m, i) => {
+                  const cx = PAD_L + slot * i + slot / 2;
+                  return (
+                    <g key={m.month}>
+                      {sumsFor(m).map(({ tag, value }, idx) => {
+                        const h = (Math.max(value, 0) / top) * plotH;
+                        if (h <= 0) return null;
+                        const x = cx - groupW / 2 + idx * eachW + (eachW - barW) / 2;
+                        return (
+                          <rect
+                            key={tag.id}
+                            x={x}
+                            y={PAD_T + plotH - h}
+                            width={barW}
+                            height={h}
+                            rx={1.5}
+                            fill={TAG_HEX[tag.color]}
+                            onPointerMove={(e) =>
+                              showTip(e, [money(value), `#${tag.name} · ${monthLabel(m.month)}`])
+                            }
+                            onPointerLeave={() => setTip(null)}
+                          />
+                        );
+                      })}
+                      <text x={cx} y={H - 6} textAnchor="middle" fontSize={10} fill={INK_MUTED}>
+                        {monthLabel(m.month, "short")}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          </div>
+          {/* Legend — multi-hue chart, so every series is named. */}
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
+            {series.map((tag) => (
+              <span key={tag.id} className="flex items-center gap-1.5">
+                <span className={`h-2 w-2 rounded-full ${TAG_DOT_CLASSES[tag.color]}`} />
+                {tag.name}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -1373,6 +1569,8 @@ export function Bank() {
           <DailyChart daily={d.daily} month={d.month} />
         </Card>
       </div>
+
+      <TagTrendCard d={d} />
 
       <CategoryCard categories={d.categories} transactions={d.transactions} tagged={d.tagged} />
 

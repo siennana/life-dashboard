@@ -477,13 +477,33 @@ export async function buildSpendingDashboard(
   const projected =
     month === currentMonth && dayOfMonth > 1 ? round2((spend / dayOfMonth) * daysInMonth) : null;
 
-  // Last 12 months, oldest first, for the trend chart.
+  // Last 12 months, oldest first, for the trend chart. Each month also gets
+  // per-tag net spend sums (merchant rules -> tag ids) for the Tag trend
+  // widget — computed for every tag; the client picks its monitored subset.
+  const keyToTagIds = new Map<string, number[]>();
+  for (const rule of ruleRows) {
+    const ids = keyToTagIds.get(rule.merchantKey) ?? [];
+    ids.push(rule.tagId);
+    keyToTagIds.set(rule.merchantKey, ids);
+  }
   const trend = months
     .slice(0, 12)
     .reverse()
     .map((m) => {
       const ts = txs.filter((t) => t.month === m);
-      return { month: m, spend: spendOf(ts), income: incomeOf(ts) };
+      const tagSums = new Map<number, number>();
+      for (const t of ts) {
+        if (!(isSpend(t) || isRefund(t))) continue;
+        const ids = keyToTagIds.get(merchantKeyOf(t.name));
+        if (!ids) continue;
+        for (const id of ids) tagSums.set(id, (tagSums.get(id) ?? 0) + t.amount);
+      }
+      return {
+        month: m,
+        spend: spendOf(ts),
+        income: incomeOf(ts),
+        tagSpend: [...tagSums].map(([tagId, spend]) => ({ tagId, spend: round2(spend) })),
+      };
     });
 
   // Per-day spend + running total across the selected month.

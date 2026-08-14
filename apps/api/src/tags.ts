@@ -14,8 +14,13 @@ const toTag = (r: typeof tags.$inferSelect): Tag => ({
 });
 
 export async function listTags(db: Db): Promise<Tag[]> {
-  const rows = await db.select().from(tags).orderBy(asc(tags.name));
-  return rows.map(toTag);
+  const [rows, rules] = await Promise.all([
+    db.select().from(tags).orderBy(asc(tags.name)),
+    db.select({ tagId: tagRules.tagId }).from(tagRules),
+  ]);
+  const counts = new Map<number, number>();
+  for (const r of rules) counts.set(r.tagId, (counts.get(r.tagId) ?? 0) + 1);
+  return rows.map((r) => ({ ...toTag(r), merchants: counts.get(r.id) ?? 0 }));
 }
 
 // Create by name; re-creating an existing name returns the existing tag

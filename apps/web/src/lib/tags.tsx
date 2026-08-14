@@ -28,6 +28,19 @@ export const TAG_TEXT_CLASSES: Record<TagColor, string> = {
   pink: "text-pink-400",
 };
 
+// Hex of each token's 400 step, for SVG fills (charts can't use utility
+// classes on <rect>). Matches TAG_DOT_CLASSES.
+export const TAG_HEX: Record<TagColor, string> = {
+  zinc: "#a1a1aa",
+  red: "#f87171",
+  amber: "#fbbf24",
+  emerald: "#34d399",
+  sky: "#38bdf8",
+  blue: "#60a5fa",
+  violet: "#a78bfa",
+  pink: "#f472b6",
+};
+
 // Solid swatch dots for the color picker.
 export const TAG_DOT_CLASSES: Record<TagColor, string> = {
   zinc: "bg-zinc-400",

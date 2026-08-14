@@ -36,6 +36,10 @@ export function TagEditor() {
 
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Deleting is two-step: the x arms this row, an inline bar asks for the
+  // actual Delete (deletion cascades the tag off every merchant — too much to
+  // lose to a stray click).
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
 
   function submitNew() {
     const name = newName.trim();
@@ -103,15 +107,44 @@ export function TagEditor() {
               </button>
               <button
                 type="button"
-                onClick={() => remove.mutate(tag.id)}
+                onClick={() => setConfirmingId((cur) => (cur === tag.id ? null : tag.id))}
                 disabled={busy}
                 aria-label={`Delete ${tag.name}`}
+                aria-expanded={confirmingId === tag.id}
                 title="Delete tag (removes it from every merchant)"
                 className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded text-zinc-500 hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <XIcon className="h-3.5 w-3.5" />
               </button>
             </div>
+            {confirmingId === tag.id && (
+              <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-red-900/60 bg-red-500/5 px-2 py-1.5 text-xs">
+                <span className="min-w-0 flex-1 text-zinc-300">
+                  Delete <span className="font-medium text-zinc-100">#{tag.name}</span>
+                  {(tag.merchants ?? 0) > 0
+                    ? ` and remove it from ${tag.merchants} merchant${tag.merchants === 1 ? "" : "s"}?`
+                    : "?"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmingId(null);
+                    remove.mutate(tag.id);
+                  }}
+                  disabled={busy}
+                  className="shrink-0 cursor-pointer rounded border border-red-800/70 px-2 py-0.5 text-red-400 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingId(null)}
+                  className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-zinc-400 hover:bg-zinc-700/50"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
             {editingId === tag.id && (
               <div className="mt-2 space-y-2 pl-1">
                 <input

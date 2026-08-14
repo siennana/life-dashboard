@@ -488,6 +488,9 @@ export const tagSchema = z.object({
   id: z.number(),
   name: z.string(),
   color: tagColorSchema,
+  // How many merchants carry the tag. Filled by GET /api/tags (the editor's
+  // delete confirmation states the blast radius); absent in embedded uses.
+  merchants: z.number().optional(),
 });
 export type Tag = z.infer<typeof tagSchema>;
 
@@ -543,7 +546,17 @@ export const spendingDashboardSchema = z.object({
     prevMonthSpend: z.number().nullable(),
     projected: z.number().nullable(), // spend pace * days-in-month; current month only
   }),
-  trend: z.array(z.object({ month: z.string(), spend: z.number(), income: z.number() })),
+  // 12-month trend; tagSpend carries per-tag net spend sums for every tag
+  // with movement that month (the Tag trend widget picks its monitored
+  // subset client-side).
+  trend: z.array(
+    z.object({
+      month: z.string(),
+      spend: z.number(),
+      income: z.number(),
+      tagSpend: z.array(z.object({ tagId: z.number(), spend: z.number() })),
+    }),
+  ),
   daily: z.array(z.object({ date: z.string(), spend: z.number(), cumulative: z.number() })),
   categories: z.array(z.object({ category: z.string(), spend: z.number(), count: z.number() })),
   accounts: z.array(spendingAccountSchema),
