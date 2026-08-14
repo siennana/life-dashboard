@@ -177,6 +177,32 @@ function CashflowBadge({ day, covered }: { day: CashflowDay | undefined; covered
   );
 }
 
+// The filter dropdown's choices, persisted per machine so they survive
+// navigating away (the page unmounts) and reloads. Sets serialize as arrays;
+// stale entries (deleted tags, renamed calendars) are harmless — they simply
+// stop matching anything.
+const CALENDAR_FILTERS_KEY = "calendar.filters";
+
+type StoredCalendarFilters = {
+  showExercise: boolean;
+  showExerciseMark: boolean;
+  showCashflow: boolean;
+  showHealth: boolean;
+  showWeather: boolean;
+  includeRecurring: boolean;
+  hiddenCalendars: string[];
+  excludedTags: number[];
+};
+
+function readStoredFilters(): Partial<StoredCalendarFilters> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CALENDAR_FILTERS_KEY) ?? "{}") as unknown;
+    return raw != null && typeof raw === "object" ? (raw as Partial<StoredCalendarFilters>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export function CalendarPage() {
   const now = new Date();
   const isMobile = useIsMobile();
@@ -252,20 +278,27 @@ export function CalendarPage() {
 
   // What's shown on the calendar: Events (exercise, CalDAV — the latter as
   // a set of *excluded* calendar names, so newly-synced calendars default to
-  // visible) and Data (cashflow/health/weather badges). All on by default.
-  const [showExercise, setShowExercise] = useState(true);
-  const [hiddenCalendars, setHiddenCalendars] = useState<Set<string>>(new Set());
-  const [showCashflow, setShowCashflow] = useState(true);
-  const [showHealth, setShowHealth] = useState(true);
-  const [showWeather, setShowWeather] = useState(true);
+  // visible) and Data (cashflow/health/weather badges). All on by default;
+  // choices persist in localStorage (per machine) — there's no save button,
+  // the effect below writes on every change and unmount resets nothing.
+  const [stored] = useState(readStoredFilters);
+  const [showExercise, setShowExercise] = useState(stored.showExercise ?? true);
+  const [hiddenCalendars, setHiddenCalendars] = useState<Set<string>>(
+    new Set(stored.hiddenCalendars ?? []),
+  );
+  const [showCashflow, setShowCashflow] = useState(stored.showCashflow ?? true);
+  const [showHealth, setShowHealth] = useState(stored.showHealth ?? true);
+  const [showWeather, setShowWeather] = useState(stored.showWeather ?? true);
   // Cashflow section: whether confirmed recurring charges (rent, subscriptions)
   // count in the day chips. Off by default — the calendar view is for
   // discretionary spend, not the monthly Netflix charge.
-  const [includeRecurring, setIncludeRecurring] = useState(false);
+  const [includeRecurring, setIncludeRecurring] = useState(stored.includeRecurring ?? false);
   // Tags excluded from the cashflow sums (their merchants' transactions are
   // dropped server-side — ?excludeTags on the cashflow endpoint — so a
   // merchant carrying two excluded tags isn't subtracted twice).
-  const [excludedTags, setExcludedTags] = useState<Set<number>>(new Set());
+  const [excludedTags, setExcludedTags] = useState<Set<number>>(
+    new Set(stored.excludedTags ?? []),
+  );
   const tagsQuery = useTags();
   const tagList = tagsQuery.data?.tags ?? [];
 
@@ -289,9 +322,35 @@ export function CalendarPage() {
   // The corner dumbbell marker — independent of the Events "Exercise" toggle
   // (which controls chips/dots/schedule blocks), so a day can show the marker
   // without the entries, or vice versa.
-  const [showExerciseMark, setShowExerciseMark] = useState(true);
+  const [showExerciseMark, setShowExerciseMark] = useState(stored.showExerciseMark ?? true);
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
+
+  // Autosave every filter change (cheap; runs once per toggle).
+  useEffect(() => {
+    localStorage.setItem(
+      CALENDAR_FILTERS_KEY,
+      JSON.stringify({
+        showExercise,
+        showExerciseMark,
+        showCashflow,
+        showHealth,
+        showWeather,
+        includeRecurring,
+        hiddenCalendars: [...hiddenCalendars],
+        excludedTags: [...excludedTags],
+      } satisfies StoredCalendarFilters),
+    );
+  }, [
+    showExercise,
+    showExerciseMark,
+    showCashflow,
+    showHealth,
+    showWeather,
+    includeRecurring,
+    hiddenCalendars,
+    excludedTags,
+  ]);
 
   // Distinct CalDAV calendar names seen in the fetched events (e.g. "Family",
   // "Calendar"), sorted for a stable dropdown order.
