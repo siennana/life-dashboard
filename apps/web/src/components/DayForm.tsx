@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { closeTodo, getDayTransactions } from "../api";
+import { closeTodo, getDayTransactions, getGithubCommits } from "../api";
 import { money } from "../lib/finance";
 import { CompleteButton, useTodosDueOn } from "../lib/todos";
 import { DaySchedule } from "./DaySchedule";
@@ -16,10 +16,10 @@ function TodosForDay({ date }: { date: string }) {
   });
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex shrink-0 flex-col">
       <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Todos</span>
-      {/* max-h caps long lists when the column is content-sized (mobile). */}
-      <div className="max-h-56 min-h-16 flex-1 overflow-y-auto rounded-lg border border-zinc-700 p-2 md:max-h-none">
+      {/* Capped + internally scrolling; the column scrolls past the total. */}
+      <div className="max-h-56 min-h-16 overflow-y-auto rounded-lg border border-zinc-700 p-2">
         {due.length === 0 && completed.length === 0 ? (
           <div className="flex h-full min-h-12 items-center justify-center text-[11px] text-zinc-600">
             None due
@@ -62,11 +62,11 @@ function TransactionsForDay({ date }: { date: string }) {
   const txs = q.data?.transactions ?? [];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex shrink-0 flex-col">
       <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
         Transactions
       </span>
-      <div className="max-h-56 min-h-16 flex-1 overflow-y-auto rounded-lg border border-zinc-700 p-2 md:max-h-none">
+      <div className="max-h-56 min-h-16 overflow-y-auto rounded-lg border border-zinc-700 p-2">
         {txs.length === 0 ? (
           <div className="flex h-full min-h-12 items-center justify-center text-[11px] text-zinc-600">
             {q.isPending ? "…" : "None"}
@@ -93,9 +93,53 @@ function TransactionsForDay({ date }: { date: string }) {
   );
 }
 
-// The widened-day form. Left column: log + todos + transactions. Right column:
-// schedule. On mobile the columns stack (page scrolls) and the schedule gets a
-// fixed height so its timeline still scrolls internally.
+// GitHub commits authored on this day — shares the ["github-commits"] query
+// with the Projects page (local calendar day derived from each commit ts).
+// Each row links out to the commit on GitHub.
+function CommitsForDay({ date }: { date: string }) {
+  const q = useQuery({ queryKey: ["github-commits"], queryFn: getGithubCommits });
+  const dayCommits = (q.data?.commits ?? []).filter((c) => {
+    const d = new Date(c.ts);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return key === date;
+  });
+
+  return (
+    <div className="flex shrink-0 flex-col">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Commits</span>
+      <div className="max-h-56 min-h-16 overflow-y-auto rounded-lg border border-zinc-700 p-2">
+        {dayCommits.length === 0 ? (
+          <div className="flex h-full min-h-12 items-center justify-center text-[11px] text-zinc-600">
+            {q.isPending ? "…" : "None"}
+          </div>
+        ) : (
+          <ul className="space-y-1.5">
+            {dayCommits.map((c) => (
+              <li key={c.sha} className="flex items-center gap-2 text-xs">
+                <a
+                  href={c.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 flex-1 truncate text-zinc-200 hover:text-blue-400 hover:underline"
+                  title={c.message}
+                >
+                  {c.message.split("\n")[0]}
+                </a>
+                <span className="shrink-0 text-[10px] text-zinc-500">{c.repo.split("/")[1] ?? c.repo}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// The widened-day form. Left column: log + todos + transactions + commits —
+// the column itself scrolls once the sections outgrow the fixed calendar
+// height (each list also caps and scrolls internally). Right column: schedule.
+// On mobile the columns stack (page scrolls) and the schedule gets a fixed
+// height so its timeline still scrolls internally.
 export function DayForm({
   date,
   showExercise,
@@ -107,10 +151,11 @@ export function DayForm({
 }) {
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 md:grid-cols-2">
-      <div className="flex min-h-0 flex-col gap-2">
+      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-0.5">
         <DayLog date={date} />
         <TodosForDay date={date} />
         <TransactionsForDay date={date} />
+        <CommitsForDay date={date} />
       </div>
       <div className="flex h-96 min-h-0 flex-col md:h-auto">
         <DaySchedule date={date} showExercise={showExercise} hiddenCalendars={hiddenCalendars} />

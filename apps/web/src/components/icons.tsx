@@ -400,3 +400,21 @@ export function PencilIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+// Code brackets - the commits datalet mark on the calendar.
+export function CodeIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+    </svg>
+  );
+}

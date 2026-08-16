@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getCalendarLastUpdated, getCashflow, getWeather, togglePeriodDay } from "../api";
+import {
+  getCalendarLastUpdated,
+  getCashflow,
+  getGithubCommits,
+  getWeather,
+  togglePeriodDay,
+} from "../api";
 import { useTags } from "../lib/tags";
 import type { CashflowDay } from "@life/shared";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
-import { BloodDropIcon, ExerciseIcon, FunnelIcon } from "../components/icons";
+import { BloodDropIcon, CodeIcon, ExerciseIcon, FunnelIcon } from "../components/icons";
 import { quietBtnClass } from "../lib/controls";
 import { weatherEmoji } from "../lib/weather";
 import { usePeriodDays } from "../lib/period";
@@ -77,32 +83,51 @@ function dayNumClass(opts: { isToday: boolean; inMonth: boolean; small: boolean 
   return `inline-flex shrink-0 items-center justify-center rounded-full transition-all duration-300 ${size} ${color}`;
 }
 
-// Shared size for the datalet marks (period droplet + workout figure).
+// Shared size for the datalet marks (period droplet + workout figure + code).
 const MARK_SIZE = "h-3.5 w-3.5";
 const dropletClass = `${MARK_SIZE} shrink-0 text-red-500`;
 const exerciseClass = `${MARK_SIZE} shrink-0 text-blue-400`;
+const codeClass = `${MARK_SIZE} shrink-0 text-emerald-400`;
 
-// The datalet marks grouped at a cell's bottom-left corner (droplet then
-// exercise figure, with a gap). Parent cell must be `relative`. Renders nothing
-// when both are off — compressed/squeezed cells pass false for both so no marks
-// show, matching how the weather/cashflow badges disappear there.
-function CornerMarks({ period, exercise }: { period: boolean; exercise: boolean }) {
-  if (!period && !exercise) return null;
+// The datalet marks grouped at a cell's bottom-left corner (droplet, exercise
+// figure, code brackets, with a gap). Parent cell must be `relative`. Renders
+// nothing when all are off — compressed/squeezed cells pass false for all so
+// no marks show, matching how the weather/cashflow badges disappear there.
+function CornerMarks({
+  period,
+  exercise,
+  commits,
+}: {
+  period: boolean;
+  exercise: boolean;
+  commits: boolean;
+}) {
+  if (!period && !exercise && !commits) return null;
   return (
     <span className="pointer-events-none absolute bottom-0.5 left-0.5 flex items-center gap-0.5">
       {period && <BloodDropIcon className={dropletClass} />}
       {exercise && <ExerciseIcon className={exerciseClass} />}
+      {commits && <CodeIcon className={codeClass} />}
     </span>
   );
 }
 
 // The same datalet marks rendered inline — for the expanded-day header, where
 // they group next to the weather/cashflow badges instead of in a corner.
-function DataletBadges({ period, exercise }: { period: boolean; exercise: boolean }) {
+function DataletBadges({
+  period,
+  exercise,
+  commits,
+}: {
+  period: boolean;
+  exercise: boolean;
+  commits: boolean;
+}) {
   return (
     <>
       {period && <BloodDropIcon className={dropletClass} />}
       {exercise && <ExerciseIcon className={exerciseClass} />}
+      {commits && <CodeIcon className={codeClass} />}
     </>
   );
 }
@@ -186,6 +211,7 @@ const CALENDAR_FILTERS_KEY = "calendar.filters";
 type StoredCalendarFilters = {
   showExercise: boolean;
   showExerciseMark: boolean;
+  showCommitsMark: boolean;
   showCashflow: boolean;
   showHealth: boolean;
   showWeather: boolean;
@@ -323,6 +349,8 @@ export function CalendarPage() {
   // (which controls chips/dots/schedule blocks), so a day can show the marker
   // without the entries, or vice versa.
   const [showExerciseMark, setShowExerciseMark] = useState(stored.showExerciseMark ?? true);
+  // Code-brackets mark on days with GitHub commits (Datalet > Commits).
+  const [showCommitsMark, setShowCommitsMark] = useState(stored.showCommitsMark ?? true);
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
@@ -333,6 +361,7 @@ export function CalendarPage() {
       JSON.stringify({
         showExercise,
         showExerciseMark,
+        showCommitsMark,
         showCashflow,
         showHealth,
         showWeather,
@@ -344,6 +373,7 @@ export function CalendarPage() {
   }, [
     showExercise,
     showExerciseMark,
+    showCommitsMark,
     showCashflow,
     showHealth,
     showWeather,
@@ -351,6 +381,19 @@ export function CalendarPage() {
     hiddenCalendars,
     excludedTags,
   ]);
+
+  // Commit days for the datalet mark — shares the ["github-commits"] query
+  // with the Projects page; local calendar day derived from each commit ts.
+  const commits = useQuery({ queryKey: ["github-commits"], queryFn: getGithubCommits });
+  const commitDays = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of commits.data?.commits ?? []) {
+      const d = new Date(c.ts);
+      set.add(dateKey(d.getFullYear(), d.getMonth(), d.getDate()));
+    }
+    return set;
+  }, [commits.data]);
+  const hasCommits = (key: string) => commitDays.has(key);
 
   // Distinct CalDAV calendar names seen in the fetched events (e.g. "Family",
   // "Calendar"), sorted for a stable dropdown order.
@@ -377,6 +420,7 @@ export function CalendarPage() {
   const filtersActive =
     !showExercise ||
     !showExerciseMark ||
+    !showCommitsMark ||
     !showCashflow ||
     !showHealth ||
     !showWeather ||
@@ -757,6 +801,7 @@ export function CalendarPage() {
                         <CornerMarks
                           period={showHealth && periodDays.has(key)}
                           exercise={showExerciseMark && hasExercise(key)}
+                        commits={showCommitsMark && hasCommits(key)}
                         />
                         <span className={dayNum(key, cell.inMonth, false)}>{cell.day}</span>
                         {dayBadges(key, true)}
@@ -801,6 +846,7 @@ export function CalendarPage() {
                       <CornerMarks
                         period={showHealth && periodDays.has(key)}
                         exercise={showExerciseMark && hasExercise(key)}
+                        commits={showCommitsMark && hasCommits(key)}
                       />
                       <span className="text-[10px] uppercase tracking-wide text-zinc-500">
                         {WEEKDAYS[i]}
@@ -830,6 +876,7 @@ export function CalendarPage() {
                   <DataletBadges
                     period={showHealth && periodDays.has(expandedDay)}
                     exercise={showExerciseMark && hasExercise(expandedDay)}
+                    commits={showCommitsMark && hasCommits(expandedDay)}
                   />
                   {dayBadges(expandedDay, true)}
                 </span>
@@ -951,6 +998,11 @@ export function CalendarPage() {
                   label="Exercise"
                   checked={showExerciseMark}
                   onChange={() => setShowExerciseMark((v) => !v)}
+                />
+                <TriCheckbox
+                  label="Commits"
+                  checked={showCommitsMark}
+                  onChange={() => setShowCommitsMark((v) => !v)}
                 />
                 <TriCheckbox
                   label="Cashflow"
@@ -1124,6 +1176,7 @@ export function CalendarPage() {
                                     <DataletBadges
                                       period={showHealth && periodDays.has(k)}
                                       exercise={showExerciseMark && hasExercise(k)}
+                                      commits={showCommitsMark && hasCommits(k)}
                                     />
                                     {dayBadges(k, true)}
                                   </span>
@@ -1218,6 +1271,7 @@ export function CalendarPage() {
                               <DataletBadges
                                 period={showHealth && periodDays.has(key)}
                                 exercise={showExerciseMark && hasExercise(key)}
+                        commits={showCommitsMark && hasCommits(key)}
                               />
                               {dayBadges(key)}
                             </span>
@@ -1254,6 +1308,7 @@ export function CalendarPage() {
                           <CornerMarks
                             period={showHealth && periodDays.has(key)}
                             exercise={showExerciseMark && hasExercise(key)}
+                        commits={showCommitsMark && hasCommits(key)}
                           />
                         )}
                         <div className="flex items-center justify-between gap-1">
