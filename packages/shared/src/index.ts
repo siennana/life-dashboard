@@ -573,7 +573,7 @@ export const UI_FONTS = ["system", "inter", "jetbrains-mono", "consolas", "georg
 export const uiFontSchema = z.enum(UI_FONTS);
 export type UiFont = z.infer<typeof uiFontSchema>;
 
-export const UI_THEMES = ["dark", "light"] as const;
+export const UI_THEMES = ["dark", "light", "royal-velvet", "sandbox"] as const;
 export const uiThemeSchema = z.enum(UI_THEMES);
 export type UiTheme = z.infer<typeof uiThemeSchema>;
 
@@ -629,6 +629,12 @@ export const calendarLastUpdatedSchema = z.object({
   updatedAt: z.string().nullable(),
 });
 export type CalendarLastUpdated = z.infer<typeof calendarLastUpdatedSchema>;
+
+// Dates with a non-blank day log — the calendar's Logged (pencil) datalet.
+export const loggedDaysResponseSchema = z.object({
+  days: z.array(z.string()), // YYYY-MM-DD
+});
+export type LoggedDaysResponse = z.infer<typeof loggedDaysResponseSchema>;
 
 export const saveDayLogInputSchema = z.object({
   log: z.string().max(20000),

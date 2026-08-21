@@ -13,6 +13,7 @@ import type {
   ExercisesResponse,
   GithubCommitsResponse,
   GithubReposResponse,
+  LoggedDaysResponse,
   PeriodsResponse,
   PeriodToggleInput,
   PeriodToggleResult,
@@ -237,6 +238,8 @@ export const getDayLog = (date: string) => apiFetch<CalendarDayLog>(`/api/calend
 
 export const getCalendarLastUpdated = () =>
   apiFetch<CalendarLastUpdated>("/api/calendar/last-updated");
+
+export const getLoggedDays = () => apiFetch<LoggedDaysResponse>("/api/calendar/logged-days");
 
 export const getSpending = (month?: string) =>
   apiFetch<SpendingDashboard>(`/api/finance/spending${month ? `?month=${month}` : ""}`);

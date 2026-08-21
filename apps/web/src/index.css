@@ -80,3 +80,48 @@ body {
   --color-red-300: #b91c1c;
   --color-red-400: #dc2626;
 }
+
+/* Sandbox: default dark with only the page plane dropped to near-black, so
+   cards/nav (still stock zinc-900) read as components floating on the darker
+   canvas. Deliberately remaps nothing else. */
+:root[data-theme="sandbox"] {
+  --color-zinc-950: #040405; /* page plane */
+}
+
+/* Royal Velvet: ported from the Obsidian community theme (caro401/royal-velvet).
+   Same orientation as default dark — the zinc scale is retinted to the theme's
+   blue-charcoal cast (anchors #14141b / #1d1e26 / #f8f8f2, middle steps
+   interpolated along the same hue), not inverted like light. */
+:root[data-theme="royal-velvet"] {
+  --color-zinc-950: #14141b; /* page plane */
+  --color-zinc-900: #1d1e26; /* card surface */
+  --color-zinc-800: #2b2d3d; /* raised controls / borders */
+  --color-zinc-700: #3c3f54;
+  --color-zinc-600: #565a75;
+  --color-zinc-500: #767a94;
+  --color-zinc-400: #9a9db3;
+  --color-zinc-300: #bfc1d0;
+  --color-zinc-200: #dcdde5;
+  --color-zinc-100: #f8f8f2; /* primary text */
+  --color-zinc-50: #ffffff;
+
+  /* Accent TEXT steps (same set the light theme remaps), hue-shifted to the
+     theme's neons: violet→purple #9580ff, blue→periwinkle, sky→cyan #80ffea,
+     emerald→green #8aff80, amber→orange #ffca80, red→soft red #ff9580. The
+     neon sits at the 300 step; 100/200 are lighter tints, 400 slightly deeper.
+     Washes/rings and solid buttons stay stock. */
+  --color-violet-100: #cfc6ff;
+  --color-violet-200: #b2a3ff;
+  --color-violet-300: #9580ff;
+  --color-blue-100: #cdd8ff;
+  --color-blue-200: #abbdff;
+  --color-blue-300: #8aa2ff;
+  --color-emerald-300: #8aff80;
+  --color-emerald-400: #62e05c;
+  --color-sky-300: #80ffea;
+  --color-sky-400: #55e6cf;
+  --color-amber-300: #ffca80;
+  --color-amber-400: #f4ad55;
+  --color-red-300: #ff9580;
+  --color-red-400: #f26e56;
+}

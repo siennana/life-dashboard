@@ -20,8 +20,9 @@ export function DayLog({ date, showLabel = true }: { date: string; showLabel?: b
     mutationFn: (value: string) => saveDayLog(date, value),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["day-log", date] });
-      // Refresh the page-level "last saved" stamp.
+      // Refresh the page-level "last saved" stamp + the pencil datalet marks.
       queryClient.invalidateQueries({ queryKey: ["calendar-last-updated"] });
+      queryClient.invalidateQueries({ queryKey: ["logged-days"] });
       setDirty(false);
     },
   });

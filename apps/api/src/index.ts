@@ -11,7 +11,7 @@ import { createBook, deleteBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
 import { listPeriodDays, togglePeriodDay } from "./period";
-import { getDayLog, getLastUpdated, saveDayLog } from "./calendarDay";
+import { getDayLog, getLastUpdated, getLoggedDays, saveDayLog } from "./calendarDay";
 import {
   buildDailyCashflow,
   buildDayTransactions,
@@ -535,6 +535,12 @@ const DATE_PARAM = /^\d{4}-\d{2}-\d{2}$/;
 app.get("/api/calendar/last-updated", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   return getLastUpdated(db);
+});
+
+// Dates with a non-blank day log — the calendar's Logged (pencil) datalet.
+app.get("/api/calendar/logged-days", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return getLoggedDays(db);
 });
 
 // Calendar day detail: the free-text log for a day's expanded-cell form.

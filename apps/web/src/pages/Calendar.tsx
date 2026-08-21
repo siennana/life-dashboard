@@ -4,13 +4,20 @@ import {
   getCalendarLastUpdated,
   getCashflow,
   getGithubCommits,
+  getLoggedDays,
   getWeather,
   togglePeriodDay,
 } from "../api";
 import { useTags } from "../lib/tags";
 import type { CashflowDay } from "@life/shared";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
-import { BloodDropIcon, CodeIcon, ExerciseIcon, FunnelIcon } from "../components/icons";
+import {
+  BloodDropIcon,
+  CodeIcon,
+  ExerciseIcon,
+  FunnelIcon,
+  PencilIcon,
+} from "../components/icons";
 import { quietBtnClass } from "../lib/controls";
 import { weatherEmoji } from "../lib/weather";
 import { usePeriodDays } from "../lib/period";
@@ -83,51 +90,44 @@ function dayNumClass(opts: { isToday: boolean; inMonth: boolean; small: boolean 
   return `inline-flex shrink-0 items-center justify-center rounded-full transition-all duration-300 ${size} ${color}`;
 }
 
-// Shared size for the datalet marks (period droplet + workout figure + code).
+// Shared size for the datalet marks (period droplet, workout figure, code
+// brackets, log pencil).
 const MARK_SIZE = "h-3.5 w-3.5";
 const dropletClass = `${MARK_SIZE} shrink-0 text-red-500`;
 const exerciseClass = `${MARK_SIZE} shrink-0 text-blue-400`;
 const codeClass = `${MARK_SIZE} shrink-0 text-emerald-400`;
+// The pencil's art fills its viewBox corner-to-corner, so at MARK_SIZE it
+// reads taller than the other marks — one notch smaller evens them out.
+const pencilClass = "h-3 w-3 shrink-0 text-amber-400";
+
+type DataletFlags = { period: boolean; exercise: boolean; commits: boolean; logged: boolean };
 
 // The datalet marks grouped at a cell's bottom-left corner (droplet, exercise
-// figure, code brackets, with a gap). Parent cell must be `relative`. Renders
-// nothing when all are off — compressed/squeezed cells pass false for all so
-// no marks show, matching how the weather/cashflow badges disappear there.
-function CornerMarks({
-  period,
-  exercise,
-  commits,
-}: {
-  period: boolean;
-  exercise: boolean;
-  commits: boolean;
-}) {
-  if (!period && !exercise && !commits) return null;
+// figure, code brackets, pencil, with a gap). Parent cell must be `relative`.
+// Renders nothing when all are off — compressed/squeezed cells pass false for
+// all so no marks show, matching how the weather/cashflow badges disappear
+// there.
+function CornerMarks({ period, exercise, commits, logged }: DataletFlags) {
+  if (!period && !exercise && !commits && !logged) return null;
   return (
     <span className="pointer-events-none absolute bottom-0.5 left-0.5 flex items-center gap-0.5">
       {period && <BloodDropIcon className={dropletClass} />}
       {exercise && <ExerciseIcon className={exerciseClass} />}
       {commits && <CodeIcon className={codeClass} />}
+      {logged && <PencilIcon className={pencilClass} />}
     </span>
   );
 }
 
 // The same datalet marks rendered inline — for the expanded-day header, where
 // they group next to the weather/cashflow badges instead of in a corner.
-function DataletBadges({
-  period,
-  exercise,
-  commits,
-}: {
-  period: boolean;
-  exercise: boolean;
-  commits: boolean;
-}) {
+function DataletBadges({ period, exercise, commits, logged }: DataletFlags) {
   return (
     <>
       {period && <BloodDropIcon className={dropletClass} />}
       {exercise && <ExerciseIcon className={exerciseClass} />}
       {commits && <CodeIcon className={codeClass} />}
+      {logged && <PencilIcon className={pencilClass} />}
     </>
   );
 }
@@ -212,6 +212,7 @@ type StoredCalendarFilters = {
   showExercise: boolean;
   showExerciseMark: boolean;
   showCommitsMark: boolean;
+  showLoggedMark: boolean;
   showCashflow: boolean;
   showHealth: boolean;
   showWeather: boolean;
@@ -351,6 +352,8 @@ export function CalendarPage() {
   const [showExerciseMark, setShowExerciseMark] = useState(stored.showExerciseMark ?? true);
   // Code-brackets mark on days with GitHub commits (Datalet > Commits).
   const [showCommitsMark, setShowCommitsMark] = useState(stored.showCommitsMark ?? true);
+  // Pencil mark on days with a filled-out log (Datalet > Logged).
+  const [showLoggedMark, setShowLoggedMark] = useState(stored.showLoggedMark ?? true);
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
@@ -362,6 +365,7 @@ export function CalendarPage() {
         showExercise,
         showExerciseMark,
         showCommitsMark,
+        showLoggedMark,
         showCashflow,
         showHealth,
         showWeather,
@@ -374,6 +378,7 @@ export function CalendarPage() {
     showExercise,
     showExerciseMark,
     showCommitsMark,
+    showLoggedMark,
     showCashflow,
     showHealth,
     showWeather,
@@ -394,6 +399,16 @@ export function CalendarPage() {
     return set;
   }, [commits.data]);
   const hasCommits = (key: string) => commitDays.has(key);
+
+  // Days with a non-blank log, for the pencil mark. The log's autosave
+  // invalidates ["logged-days"], so the mark appears as soon as a day is
+  // first written.
+  const loggedDaysQuery = useQuery({ queryKey: ["logged-days"], queryFn: getLoggedDays });
+  const loggedDays = useMemo(
+    () => new Set(loggedDaysQuery.data?.days ?? []),
+    [loggedDaysQuery.data],
+  );
+  const hasLog = (key: string) => loggedDays.has(key);
 
   // Distinct CalDAV calendar names seen in the fetched events (e.g. "Family",
   // "Calendar"), sorted for a stable dropdown order.
@@ -421,6 +436,7 @@ export function CalendarPage() {
     !showExercise ||
     !showExerciseMark ||
     !showCommitsMark ||
+    !showLoggedMark ||
     !showCashflow ||
     !showHealth ||
     !showWeather ||
@@ -802,6 +818,7 @@ export function CalendarPage() {
                           period={showHealth && periodDays.has(key)}
                           exercise={showExerciseMark && hasExercise(key)}
                         commits={showCommitsMark && hasCommits(key)}
+                        logged={showLoggedMark && hasLog(key)}
                         />
                         <span className={dayNum(key, cell.inMonth, false)}>{cell.day}</span>
                         {dayBadges(key, true)}
@@ -847,6 +864,7 @@ export function CalendarPage() {
                         period={showHealth && periodDays.has(key)}
                         exercise={showExerciseMark && hasExercise(key)}
                         commits={showCommitsMark && hasCommits(key)}
+                        logged={showLoggedMark && hasLog(key)}
                       />
                       <span className="text-[10px] uppercase tracking-wide text-zinc-500">
                         {WEEKDAYS[i]}
@@ -877,6 +895,7 @@ export function CalendarPage() {
                     period={showHealth && periodDays.has(expandedDay)}
                     exercise={showExerciseMark && hasExercise(expandedDay)}
                     commits={showCommitsMark && hasCommits(expandedDay)}
+                    logged={showLoggedMark && hasLog(expandedDay)}
                   />
                   {dayBadges(expandedDay, true)}
                 </span>
@@ -1003,6 +1022,11 @@ export function CalendarPage() {
                   label="Commits"
                   checked={showCommitsMark}
                   onChange={() => setShowCommitsMark((v) => !v)}
+                />
+                <TriCheckbox
+                  label="Logged"
+                  checked={showLoggedMark}
+                  onChange={() => setShowLoggedMark((v) => !v)}
                 />
                 <TriCheckbox
                   label="Cashflow"
@@ -1154,7 +1178,9 @@ export function CalendarPage() {
                           }}
                           className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 px-0.5 py-1 outline outline-2 -outline-offset-2 outline-blue-500"
                         >
-                          <div className="flex shrink-0">
+                          {/* Header band over the selected days' number/badge
+                              row, bled past the scan block's px-0.5 py-1. */}
+                          <div className="-mx-0.5 -mt-1 flex shrink-0 border-b border-zinc-800/60 bg-zinc-950/40 px-0.5 pt-1 pb-1">
                             <div style={{ width: SCAN_GUTTER }} className="shrink-0" />
                             {selCells.map((c) => {
                               const k = cellKey(c);
@@ -1177,6 +1203,7 @@ export function CalendarPage() {
                                       period={showHealth && periodDays.has(k)}
                                       exercise={showExerciseMark && hasExercise(k)}
                                       commits={showCommitsMark && hasCommits(k)}
+                                      logged={showLoggedMark && hasLog(k)}
                                     />
                                     {dayBadges(k, true)}
                                   </span>
@@ -1256,7 +1283,9 @@ export function CalendarPage() {
                         >
                           {/* Datalets sit inline with weather/cashflow up here,
                               not as corner marks (expanded-day layout). */}
-                          <div className="flex shrink-0 items-center justify-between gap-1">
+                          {/* Same header band as the month cell, bled past the
+                              expanded day's p-2 frame. */}
+                          <div className="-mx-2 -mt-2 flex shrink-0 items-center justify-between gap-1 border-b border-zinc-800/60 bg-zinc-950/40 px-2 py-1.5">
                             <button
                               type="button"
                               aria-label={`Collapse ${key}`}
@@ -1272,6 +1301,7 @@ export function CalendarPage() {
                                 period={showHealth && periodDays.has(key)}
                                 exercise={showExerciseMark && hasExercise(key)}
                         commits={showCommitsMark && hasCommits(key)}
+                        logged={showLoggedMark && hasLog(key)}
                               />
                               {dayBadges(key)}
                             </span>
@@ -1309,9 +1339,21 @@ export function CalendarPage() {
                             period={showHealth && periodDays.has(key)}
                             exercise={showExerciseMark && hasExercise(key)}
                         commits={showCommitsMark && hasCommits(key)}
+                        logged={showLoggedMark && hasLog(key)}
                           />
                         )}
-                        <div className="flex items-center justify-between gap-1">
+                        {/* Header band: darker strip behind the day number +
+                            badges with a bottom border separating it from the
+                            chips. Negative margins bleed it past the cell's
+                            p-1.5 to the edges; compressed/squeezed cells (which
+                            already hide badges) keep the bare row. */}
+                        <div
+                          className={`flex items-center justify-between gap-1 ${
+                            isCompressed || isDaySqueezed
+                              ? ""
+                              : "-mx-1.5 -mt-1.5 mb-0.5 border-b border-zinc-800/60 bg-zinc-950/40 px-1.5 py-1"
+                          }`}
+                        >
                           <span className={dayNumberClass}>{cell.day}</span>
                           {rightBadges}
                         </div>

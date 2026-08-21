@@ -14,6 +14,8 @@ const FONT_LABELS: Record<UiFont, string> = {
 const THEME_LABELS: Record<UiTheme, string> = {
   dark: "Dark (default)",
   light: "Light",
+  "royal-velvet": "Royal Velvet",
+  sandbox: "Sandbox",
 };
 // Slider bounds mirror the zod schema in @life/shared.
 const SPACING_MIN = 0.18;
