@@ -20,13 +20,19 @@ export async function saveDayLog(db: Db, date: string, log: string | null): Prom
 }
 
 // Every date with a non-blank log — the calendar's Logged (pencil) datalet
-// mark. Whitespace-only logs don't count as logged.
+// mark — plus the head of each log for the month-cell preview. Whitespace-only
+// logs don't count as logged.
 export async function getLoggedDays(db: Db): Promise<LoggedDaysResponse> {
   const rows = await db
-    .select({ date: calendarDays.date })
+    .select({ date: calendarDays.date, log: calendarDays.log })
     .from(calendarDays)
     .where(sql`${calendarDays.log} is not null and btrim(${calendarDays.log}) <> ''`);
-  return { days: rows.map((r) => r.date) };
+  return {
+    days: rows.map((r) => r.date),
+    // A few clamped lines is all a cell can show - no need to ship the whole
+    // (up to 20k char) entry to the month grid.
+    snippets: Object.fromEntries(rows.map((r) => [r.date, (r.log ?? "").trim().slice(0, 300)])),
+  };
 }
 
 // Most recent calendar-day edit across all days — powers the "last saved"

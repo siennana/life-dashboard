@@ -451,6 +451,8 @@ export function CalendarPage() {
     [loggedDaysQuery.data],
   );
   const hasLog = (key: string) => loggedDays.has(key);
+  // Head of each day's log, previewed in the month cell's leftover space.
+  const logSnippets = loggedDaysQuery.data?.snippets ?? {};
 
   // Distinct CalDAV calendar names seen in the fetched events (e.g. "Family",
   // "Calendar"), sorted for a stable dropdown order.
@@ -1421,6 +1423,16 @@ export function CalendarPage() {
                           {rightBadges}
                         </div>
                         <DayChips dayEvents={dayEvents} entries={entries} />
+                        {/* Log preview: plain text in whatever space the chips
+                            leave, clamped with an ellipsis. pb clears the
+                            corner datalet marks. */}
+                        {!isCompressed && !isDaySqueezed && logSnippets[key] && (
+                          <span className="mt-0.5 block min-h-0 flex-1 overflow-hidden pb-3.5">
+                            <span className="line-clamp-3 text-[10px] leading-snug text-zinc-500">
+                              {logSnippets[key]}
+                            </span>
+                          </span>
+                        )}
                       </button>
                     );
                     })

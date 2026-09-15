@@ -714,6 +714,8 @@ export type CalendarLastUpdated = z.infer<typeof calendarLastUpdatedSchema>;
 // Dates with a non-blank day log — the calendar's Logged (pencil) datalet.
 export const loggedDaysResponseSchema = z.object({
   days: z.array(z.string()), // YYYY-MM-DD
+  // date -> head of the log (trimmed, capped) for the month-cell preview
+  snippets: z.record(z.string(), z.string()),
 });
 export type LoggedDaysResponse = z.infer<typeof loggedDaysResponseSchema>;
 
