@@ -58,6 +58,12 @@ function buildGrid(year: number, month: number): Cell[] {
 
 const cellKey = (c: Cell) => dateKey(c.year, c.month, c.day);
 
+// Hover tooltip for a day-number circle: "9 September 2026".
+const dayTitle = (key: string) => {
+  const [y, m, d] = key.split("-").map(Number);
+  return `${d} ${MONTHS[m - 1]} ${y}`;
+};
+
 // True when a click landed on an interactive control, so container-level
 // "click empty space to collapse" handlers leave it alone.
 const isControlClick = (e: React.MouseEvent) =>
@@ -102,34 +108,63 @@ const pencilClass = "h-3 w-3 shrink-0 text-amber-400";
 
 type DataletFlags = { period: boolean; exercise: boolean; commits: boolean; logged: boolean };
 
-// The datalet marks grouped at a cell's bottom-left corner (droplet, exercise
-// figure, code brackets, pencil, with a gap). Parent cell must be `relative`.
-// Renders nothing when all are off — compressed/squeezed cells pass false for
-// all so no marks show, matching how the weather/cashflow badges disappear
-// there.
+// One datalet mark with its hover tooltip. The `title` attribute doesn't
+// produce a native tooltip on <svg> elements, so a wrapping span carries it.
+function Mark({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <span title={title} className="flex shrink-0 items-center">
+      {children}
+    </span>
+  );
+}
+
+// The four datalet marks in their fixed order (droplet, exercise figure, code
+// brackets, pencil), each with a tooltip naming what it means.
+function DataletMarks({ period, exercise, commits, logged }: DataletFlags) {
+  return (
+    <>
+      {period && (
+        <Mark title="Period day">
+          <BloodDropIcon className={dropletClass} />
+        </Mark>
+      )}
+      {exercise && (
+        <Mark title="Exercise logged">
+          <ExerciseIcon className={exerciseClass} />
+        </Mark>
+      )}
+      {commits && (
+        <Mark title="GitHub commits">
+          <CodeIcon className={codeClass} />
+        </Mark>
+      )}
+      {logged && (
+        <Mark title="Day logged">
+          <PencilIcon className={pencilClass} />
+        </Mark>
+      )}
+    </>
+  );
+}
+
+// The datalet marks grouped at a cell's bottom-left corner. Parent cell must
+// be `relative`. Renders nothing when all are off — compressed/squeezed cells
+// pass false for all so no marks show, matching how the weather/cashflow
+// badges disappear there. The span keeps pointer events (needed for the
+// tooltips); clicks on it still bubble to the cell button.
 function CornerMarks({ period, exercise, commits, logged }: DataletFlags) {
   if (!period && !exercise && !commits && !logged) return null;
   return (
-    <span className="pointer-events-none absolute bottom-0.5 left-0.5 flex items-center gap-0.5">
-      {period && <BloodDropIcon className={dropletClass} />}
-      {exercise && <ExerciseIcon className={exerciseClass} />}
-      {commits && <CodeIcon className={codeClass} />}
-      {logged && <PencilIcon className={pencilClass} />}
+    <span className="absolute bottom-0.5 left-0.5 flex items-center gap-0.5">
+      <DataletMarks period={period} exercise={exercise} commits={commits} logged={logged} />
     </span>
   );
 }
 
 // The same datalet marks rendered inline — for the expanded-day header, where
 // they group next to the weather/cashflow badges instead of in a corner.
-function DataletBadges({ period, exercise, commits, logged }: DataletFlags) {
-  return (
-    <>
-      {period && <BloodDropIcon className={dropletClass} />}
-      {exercise && <ExerciseIcon className={exerciseClass} />}
-      {commits && <CodeIcon className={codeClass} />}
-      {logged && <PencilIcon className={pencilClass} />}
-    </>
-  );
+function DataletBadges(flags: DataletFlags) {
+  return <DataletMarks {...flags} />;
 }
 
 // Checkbox that supports a visual indeterminate state (native `indeterminate`
@@ -141,12 +176,16 @@ function TriCheckbox({
   indeterminate = false,
   onChange,
   small = false,
+  icon,
 }: {
   label: string;
   checked: boolean;
   indeterminate?: boolean;
   onChange: () => void;
   small?: boolean;
+  // The row's calendar mark, shown left of the label (Datalet rows) so the
+  // toggle is matched to the glyph it controls.
+  icon?: React.ReactNode;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -161,6 +200,9 @@ function TriCheckbox({
         onChange={onChange}
         className="h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-0 focus:ring-offset-0"
       />
+      {icon && (
+        <span className="flex w-4 shrink-0 items-center justify-center">{icon}</span>
+      )}
       <span className={`truncate text-zinc-200 ${small ? "text-xs" : "text-sm"}`}>{label}</span>
     </label>
   );
@@ -820,7 +862,9 @@ export function CalendarPage() {
                         commits={showCommitsMark && hasCommits(key)}
                         logged={showLoggedMark && hasLog(key)}
                         />
-                        <span className={dayNum(key, cell.inMonth, false)}>{cell.day}</span>
+                        <span title={dayTitle(key)} className={dayNum(key, cell.inMonth, false)}>
+                          {cell.day}
+                        </span>
                         {dayBadges(key, true)}
                         {(dayEvents.length > 0 || entries.length > 0) && (
                           // Apple-style dots instead of text chips: violet =
@@ -869,7 +913,9 @@ export function CalendarPage() {
                       <span className="text-[10px] uppercase tracking-wide text-zinc-500">
                         {WEEKDAYS[i]}
                       </span>
-                      <span className={dayNum(key, cell.inMonth, false)}>{cell.day}</span>
+                      <span title={dayTitle(key)} className={dayNum(key, cell.inMonth, false)}>
+                        {cell.day}
+                      </span>
                       {dayBadges(key, true)}
                     </button>
                   );
@@ -887,7 +933,10 @@ export function CalendarPage() {
           {view === "day" && expandedDay && (
             <div className="flex flex-col gap-2 p-3">
               <div className="flex items-center justify-between gap-1">
-                <span className={dayNum(expandedDay, expandedCell?.inMonth ?? true, false)}>
+                <span
+                  title={dayTitle(expandedDay)}
+                  className={dayNum(expandedDay, expandedCell?.inMonth ?? true, false)}
+                >
                   {Number(expandedDay.slice(8))}
                 </span>
                 <span className="flex min-w-0 items-center gap-1.5">
@@ -1015,31 +1064,39 @@ export function CalendarPage() {
               <div className="mt-1">
                 <TriCheckbox
                   label="Exercise"
+                  icon={<ExerciseIcon className={exerciseClass} />}
                   checked={showExerciseMark}
                   onChange={() => setShowExerciseMark((v) => !v)}
                 />
                 <TriCheckbox
                   label="Commits"
+                  icon={<CodeIcon className={codeClass} />}
                   checked={showCommitsMark}
                   onChange={() => setShowCommitsMark((v) => !v)}
                 />
                 <TriCheckbox
                   label="Logged"
+                  icon={<PencilIcon className={pencilClass} />}
                   checked={showLoggedMark}
                   onChange={() => setShowLoggedMark((v) => !v)}
                 />
                 <TriCheckbox
                   label="Cashflow"
+                  icon={
+                    <span className="text-[11px] font-medium tabular-nums text-red-400">-$</span>
+                  }
                   checked={showCashflow}
                   onChange={() => setShowCashflow((v) => !v)}
                 />
                 <TriCheckbox
                   label="Health"
+                  icon={<BloodDropIcon className={dropletClass} />}
                   checked={showHealth}
                   onChange={() => setShowHealth((v) => !v)}
                 />
                 <TriCheckbox
                   label="Weather"
+                  icon={<span className="text-[11px] leading-none">{weatherEmoji(0)}</span>}
                   checked={showWeather}
                   onChange={() => setShowWeather((v) => !v)}
                 />
@@ -1164,7 +1221,9 @@ export function CalendarPage() {
                             }`}
                           >
                             {/* Squeezed sliver: no datalet marks (same as compressed cells). */}
-                            <span className={dayNum(key, cell.inMonth, true)}>{cell.day}</span>
+                            <span title={dayTitle(key)} className={dayNum(key, cell.inMonth, true)}>
+                              {cell.day}
+                            </span>
                           </button>
                         );
                       }
@@ -1193,6 +1252,7 @@ export function CalendarPage() {
                                   <button
                                     type="button"
                                     aria-label={`Open ${k}`}
+                                    title={dayTitle(k)}
                                     onClick={() => openDayInSelection(wi, k)}
                                     className={`${dayNum(k, c.inMonth, false)} hover:opacity-80`}
                                   >
@@ -1289,6 +1349,7 @@ export function CalendarPage() {
                             <button
                               type="button"
                               aria-label={`Collapse ${key}`}
+                              title={dayTitle(key)}
                               onClick={collapseExpandedDay}
                               className={`${dayNumberClass} hover:opacity-80`}
                             >
@@ -1354,7 +1415,9 @@ export function CalendarPage() {
                               : "-mx-1.5 -mt-1.5 mb-0.5 border-b border-zinc-800/60 bg-zinc-950/40 px-1.5 py-1"
                           }`}
                         >
-                          <span className={dayNumberClass}>{cell.day}</span>
+                          <span title={dayTitle(key)} className={dayNumberClass}>
+                            {cell.day}
+                          </span>
                           {rightBadges}
                         </div>
                         <DayChips dayEvents={dayEvents} entries={entries} />
