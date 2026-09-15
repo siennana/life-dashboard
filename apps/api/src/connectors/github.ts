@@ -10,11 +10,14 @@ import { events, metrics, syncRuns, type Db } from "@life/db";
 //      owner/name) - the Projects page's repo list.
 //   3. actual commits (message + URL) per accessible repo -> `events` (type
 //      "commit", externalId = sha) - the Projects page's day-click detail.
-// Token: classic PAT with read:user. That sees counts for everything but
-// commit/repo detail only for PUBLIC repos - private repos are folded into
-// the calendar counts by GitHub and simply don't appear in the repo list.
-// Detail reads the default branch only, so feature-branch commits join the
-// list when merged.
+// Token: fine-grained PAT, Contents read-only on all owned repos. Calendar
+// counts include everything; repo/commit detail covers public repos plus the
+// viewer's own private repos (via the pushed-repo sweep below - GitHub's
+// GraphQL treats fine-grained PATs' private contributions as "restricted" in
+// commitContributionsByRepository even when the token can read the repo, so
+// that breakdown alone would miss them). Private repos owned by someone else
+// stay calendar-only. Detail reads the default branch only, so feature-branch
+// commits join the list when merged.
 
 const OVERVIEW_QUERY = `
 query($from: DateTime!, $to: DateTime!) {
@@ -28,6 +31,17 @@ query($from: DateTime!, $to: DateTime!) {
         repository { nameWithOwner url isPrivate owner { login } name }
         contributions { totalCount }
       }
+    }
+  }
+}`;
+
+// The viewer's own repos, newest push first. One page of 50 covers repos with
+// activity inside the year window - anything older is filtered out anyway.
+const REPOS_QUERY = `
+query {
+  viewer {
+    repositories(first: 50, affiliations: [OWNER], orderBy: { field: PUSHED_AT, direction: DESC }) {
+      nodes { nameWithOwner url isPrivate pushedAt owner { login } name }
     }
   }
 }`;
@@ -71,6 +85,22 @@ type OverviewResponse = {
     };
   };
   errors?: { message?: string }[];
+};
+
+type RepoRef = {
+  nameWithOwner: string;
+  url: string;
+  isPrivate: boolean;
+  owner: { login: string };
+  name: string;
+};
+
+type ReposResponse = {
+  data?: {
+    viewer?: {
+      repositories?: { nodes: (RepoRef & { pushedAt: string })[] };
+    };
+  };
 };
 
 type HistoryResponse = {
@@ -168,22 +198,60 @@ export async function syncGithub(db: Db, token: string) {
         });
     }
 
-    // 2. Per-repo year counts -> events (type "repo"), replace semantics.
-    const byRepo = collection?.commitContributionsByRepository ?? [];
-    const now = new Date();
-    for (const r of byRepo) {
-      const payload = {
-        url: r.repository.url,
-        isPrivate: r.repository.isPrivate,
+    // 2. Contributing repos. commitContributionsByRepository is the primary
+    // source, but it omits the viewer's private repos on a fine-grained PAT
+    // (their contributions land in restrictedContributionsCount instead, even
+    // with Contents read on the repo) - so also sweep recently pushed owned
+    // repos; any with authored default-branch commits in the window counts.
+    const contributing = new Map<string, { repo: RepoRef; commitsPastYear: number | null }>();
+    for (const r of collection?.commitContributionsByRepository ?? []) {
+      contributing.set(r.repository.nameWithOwner, {
+        repo: r.repository,
         commitsPastYear: r.contributions.totalCount,
+      });
+    }
+    const pushed = await gql<ReposResponse>(token, REPOS_QUERY, {});
+    for (const r of pushed.data?.viewer?.repositories?.nodes ?? []) {
+      if (contributing.has(r.nameWithOwner) || new Date(r.pushedAt) < from) continue;
+      contributing.set(r.nameWithOwner, { repo: r, commitsPastYear: null });
+    }
+
+    // 3. Commit detail per repo, fetched before the repo rows are written so
+    // swept repos get a real count - and drop out when the viewer authored
+    // nothing on the default branch in the window. Per-repo failures degrade
+    // to "no detail for that repo", never fail the run.
+    const commitsByRepo = new Map<string, Awaited<ReturnType<typeof fetchRepoCommits>>>();
+    for (const [id, info] of contributing) {
+      try {
+        commitsByRepo.set(
+          id,
+          await fetchRepoCommits(token, info.repo.owner.login, info.repo.name, from.toISOString(), viewerId),
+        );
+      } catch {
+        commitsByRepo.set(id, []);
+      }
+    }
+    for (const [id, info] of contributing) {
+      if (info.commitsPastYear === null && (commitsByRepo.get(id)?.length ?? 0) === 0) {
+        contributing.delete(id);
+      }
+    }
+
+    // Repo year counts -> events (type "repo"), replace semantics.
+    const now = new Date();
+    for (const { repo, commitsPastYear } of contributing.values()) {
+      const payload = {
+        url: repo.url,
+        isPrivate: repo.isPrivate,
+        commitsPastYear: commitsPastYear ?? commitsByRepo.get(repo.nameWithOwner)?.length ?? 0,
       };
       await db
         .insert(events)
         .values({
           source: "github",
-          externalId: r.repository.nameWithOwner,
+          externalId: repo.nameWithOwner,
           type: "repo",
-          title: r.repository.nameWithOwner,
+          title: repo.nameWithOwner,
           startTs: now,
           payload,
         })
@@ -192,7 +260,7 @@ export async function syncGithub(db: Db, token: string) {
           set: { startTs: now, payload, updatedAt: now },
         });
     }
-    const repoIds = byRepo.map((r) => r.repository.nameWithOwner);
+    const repoIds = [...contributing.keys()];
     if (repoIds.length > 0) {
       await db
         .delete(events)
@@ -205,24 +273,12 @@ export async function syncGithub(db: Db, token: string) {
         );
     }
 
-    // 3. Commit detail per repo -> events (type "commit"). Per-repo failures
-    // degrade to "no detail for that repo", never fail the run.
+    // Commits -> events (type "commit").
     let commitCount = 0;
-    for (const r of byRepo) {
-      let commits: Awaited<ReturnType<typeof fetchRepoCommits>>;
-      try {
-        commits = await fetchRepoCommits(
-          token,
-          r.repository.owner.login,
-          r.repository.name,
-          from.toISOString(),
-          viewerId,
-        );
-      } catch {
-        continue;
-      }
+    for (const [id, commits] of commitsByRepo) {
+      if (!contributing.has(id)) continue;
       for (const c of commits) {
-        const payload = { repo: r.repository.nameWithOwner, url: c.url };
+        const payload = { repo: id, url: c.url };
         await db
           .insert(events)
           .values({
@@ -245,7 +301,7 @@ export async function syncGithub(db: Db, token: string) {
       .update(syncRuns)
       .set({ finishedAt: new Date(), status: "ok" })
       .where(eq(syncRuns.id, run.id));
-    return { ok: true, days: days.length, repos: byRepo.length, commits: commitCount };
+    return { ok: true, days: days.length, repos: contributing.size, commits: commitCount };
   } catch (err) {
     await db
       .update(syncRuns)
