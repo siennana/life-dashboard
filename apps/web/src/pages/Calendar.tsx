@@ -244,6 +244,45 @@ function CashflowBadge({ day, covered }: { day: CashflowDay | undefined; covered
   );
 }
 
+// Plain-text head of a day's log, filling whatever vertical space the cell's
+// chips leave and ellipsizing at the last line that fully fits. CSS line-clamp
+// needs a fixed line count, so measure the box (ResizeObserver — cell heights
+// animate during week expansion) and derive the count from its line-height.
+function LogPreview({ text }: { text: string }) {
+  const boxRef = useRef<HTMLSpanElement>(null);
+  const [lines, setLines] = useState(2);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const update = () => {
+      const cs = getComputedStyle(box);
+      const lineHeight = parseFloat(cs.lineHeight) || 14;
+      const avail =
+        box.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+      setLines(Math.max(1, Math.floor(avail / lineHeight)));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    // pb clears the corner datalet marks; overflow-hidden backstops the cut
+    // when not even one line fits.
+    <span
+      ref={boxRef}
+      className="mt-0.5 block min-h-0 flex-1 overflow-hidden pb-3.5 text-[10px] leading-snug text-zinc-500"
+    >
+      <span
+        className="overflow-hidden"
+        style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: lines }}
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
 // The filter dropdown's choices, persisted per machine so they survive
 // navigating away (the page unmounts) and reloads. Sets serialize as arrays;
 // stale entries (deleted tags, renamed calendars) are harmless — they simply
@@ -1423,15 +1462,8 @@ export function CalendarPage() {
                           {rightBadges}
                         </div>
                         <DayChips dayEvents={dayEvents} entries={entries} />
-                        {/* Log preview: plain text in whatever space the chips
-                            leave, clamped with an ellipsis. pb clears the
-                            corner datalet marks. */}
                         {!isCompressed && !isDaySqueezed && logSnippets[key] && (
-                          <span className="mt-0.5 block min-h-0 flex-1 overflow-hidden pb-3.5">
-                            <span className="line-clamp-3 text-[10px] leading-snug text-zinc-500">
-                              {logSnippets[key]}
-                            </span>
-                          </span>
+                          <LogPreview text={logSnippets[key]} />
                         )}
                       </button>
                     );
