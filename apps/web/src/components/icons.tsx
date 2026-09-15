@@ -401,6 +401,26 @@ export function PencilIcon({ className }: IconProps) {
   );
 }
 
+// Percent sign - the Loans nav entry (balances + interest rates).
+export function PercentIcon({ className }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="19" y1="5" x2="5" y2="19" />
+      <circle cx="6.5" cy="6.5" r="2.5" />
+      <circle cx="17.5" cy="17.5" r="2.5" />
+    </svg>
+  );
+}
+
 // Code brackets - the commits datalet mark on the calendar.
 export function CodeIcon({ className }: IconProps) {
   return (

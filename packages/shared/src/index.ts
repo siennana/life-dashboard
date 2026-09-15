@@ -365,6 +365,87 @@ export const plaidLinkTokenInputSchema = z.object({
 });
 export type PlaidLinkMode = z.infer<typeof plaidLinkTokenInputSchema>["mode"];
 
+// Loans — manual entries (source "manual", type "loan"), since no servicer is
+// linkable through Plaid (Sallie Mae is DOWN/delisted, federal servicers broke
+// in 2024). `balance` is the remaining balance as of `asOfDate`; the API
+// accrues daily simple interest from that anchor and applies linked bank
+// transactions as payments (interest first, then principal).
+export const loanInputSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  balance: z.number().min(0), // remaining balance as of asOfDate
+  asOfDate: dayString, // the day `balance` was read off the servicer
+  interestRate: z.number().min(0).max(100).optional(), // APR %
+  minimumPayment: z.number().min(0).optional(), // monthly
+  originalPrincipal: z.number().min(0).optional(),
+  dueDay: z.number().int().min(1).max(31).optional(), // monthly due day
+  lender: z.string().trim().max(200).optional(),
+});
+export type LoanInput = z.infer<typeof loanInputSchema>;
+
+// One bank transaction counted as a payment on a loan (matched via the loan's
+// linked merchants).
+export const loanPaymentSchema = z.object({
+  date: z.string(), // YYYY-MM-DD
+  amount: z.number(), // positive = money out (Plaid convention)
+  merchantKey: z.string(),
+  name: z.string(), // display merchant
+});
+export type LoanPaymentTx = z.infer<typeof loanPaymentSchema>;
+
+// A merchant stream, either linked to a loan or awaiting linking. Loans link
+// to *merchants* (normalized key — content, never transaction ids), so every
+// past and future charge from that merchant counts as a payment automatically.
+export const loanMerchantSchema = z.object({
+  merchantKey: z.string(),
+  name: z.string(), // display merchant
+  count: z.number(), // charges from this merchant (whole history)
+  total: z.number(), // sum of those charges
+  lastDate: z.string().nullable(),
+  lastAmount: z.number().nullable(),
+});
+export type LoanMerchant = z.infer<typeof loanMerchantSchema>;
+
+export const loanRowSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  balance: z.number(), // as entered, at asOfDate
+  asOfDate: z.string(),
+  interestRate: z.number().nullable(),
+  minimumPayment: z.number().nullable(),
+  originalPrincipal: z.number().nullable(),
+  dueDay: z.number().nullable(),
+  lender: z.string().nullable(),
+  createdAt: z.string(),
+  // Computed by the API from the anchor balance + linked payments + rate:
+  currentBalance: z.number(),
+  accruedInterest: z.number(), // unpaid accrued interest inside currentBalance
+  totalPaid: z.number(), // matched payments since asOfDate
+  nextDueDate: z.string().nullable(), // from dueDay
+  // Amortization estimate assuming the minimum payment continues monthly:
+  payoffDate: z.string().nullable(), // when the balance clears
+  projectedInterest: z.number().nullable(), // total interest still to be paid
+  merchants: z.array(loanMerchantSchema), // linked merchant streams
+  payments: z.array(loanPaymentSchema), // matched charges after asOfDate, newest first
+  series: z.array(z.object({ date: z.string(), value: z.number() })), // balance over time
+});
+export type LoanRow = z.infer<typeof loanRowSchema>;
+
+export const loansResponseSchema = z.object({
+  loans: z.array(loanRowSchema),
+  // student-loan-tagged merchants not yet linked to any loan
+  unassigned: z.array(loanMerchantSchema),
+  totals: z.object({ balance: z.number(), minimumPayment: z.number() }),
+});
+export type LoansResponse = z.infer<typeof loansResponseSchema>;
+
+// Link / move / unlink a merchant stream to a loan. loanId null = unlink from
+// whichever loan holds it.
+export const loanAssignInputSchema = z.object({
+  loanId: z.number().int().nullable(),
+  merchantKey: z.string().min(1),
+});
+export type LoanAssignInput = z.infer<typeof loanAssignInputSchema>;
+
 export const spendingTransactionSchema = z.object({
   id: z.number(),
   date: z.string(), // YYYY-MM-DD

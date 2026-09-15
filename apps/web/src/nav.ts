@@ -33,6 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
         ],
       },
       { path: "/finance/bank", label: "Bank", implemented: true },
+      { path: "/finance/loans", label: "Loans", implemented: true },
     ],
   },
   { path: "/exercise", label: "Exercise", implemented: true },

@@ -126,7 +126,7 @@ function toTx(r: typeof events.$inferSelect): Tx {
   };
 }
 
-async function loadTxs(db: Db): Promise<Tx[]> {
+export async function loadTxs(db: Db): Promise<Tx[]> {
   const rows = await db
     .select()
     .from(events)

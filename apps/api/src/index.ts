@@ -27,6 +27,13 @@ import {
   syncPlaid,
   type PlaidCreds,
 } from "./connectors/plaid";
+import {
+  assignLoanMerchant,
+  buildLoansResponse,
+  createLoan,
+  deleteLoan,
+  updateLoan,
+} from "./loans";
 import { syncGithub } from "./connectors/github";
 import { syncWakatime } from "./connectors/wakatime";
 import { getUiSettings, saveUiSettings } from "./settings";
@@ -34,6 +41,8 @@ import { createTag, deleteTag, listTags, toggleTagMerchant, updateTag } from "./
 import {
   bookInputSchema,
   exerciseInputSchema,
+  loanAssignInputSchema,
+  loanInputSchema,
   periodToggleInputSchema,
   plaidExchangeInputSchema,
   plaidLinkTokenInputSchema,
@@ -258,6 +267,53 @@ app.get("/api/finance/portfolio", async (req, reply) => {
   return buildPortfolio(db, config.finnhubApiKey, account, account === "individual" ? true : linked).then(
     (p) => ({ ...p, linked }),
   );
+});
+
+// Loans: manual entries (source "manual", type "loan") with linked bank
+// transactions as payments; balances are computed server-side (daily simple
+// interest from the anchor, payments applied interest-first). Local calendar
+// day as "today" so accrual/due dates match what Sienna sees.
+const localDay = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+};
+
+app.get("/api/loans", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return buildLoansResponse(db, localDay());
+});
+
+app.post("/api/loans", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return createLoan(db, loanInputSchema.parse(req.body));
+});
+
+app.put("/api/loans/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid loan id" });
+  const updated = await updateLoan(db, id, loanInputSchema.parse(req.body));
+  if (!updated) return reply.code(404).send({ error: "loan not found" });
+  return { updated: true };
+});
+
+app.delete("/api/loans/:id", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid loan id" });
+  const deleted = await deleteLoan(db, id);
+  if (!deleted) return reply.code(404).send({ error: "loan not found" });
+  return { deleted: true };
+});
+
+// Link/move/unlink a merchant stream to a loan - every past+future charge
+// from a linked merchant counts as a payment on that loan.
+app.post("/api/loans/assign-merchant", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const input = loanAssignInputSchema.parse(req.body);
+  const ok = await assignLoanMerchant(db, input);
+  if (!ok) return reply.code(404).send({ error: "loan not found" });
+  return { assigned: input.loanId != null };
 });
 
 // GitHub contribution counts (synced into metrics), for the Home heatmap.

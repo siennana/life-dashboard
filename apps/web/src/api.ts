@@ -13,6 +13,9 @@ import type {
   ExercisesResponse,
   GithubCommitsResponse,
   GithubReposResponse,
+  LoanAssignInput,
+  LoanInput,
+  LoansResponse,
   LoggedDaysResponse,
   PeriodsResponse,
   PeriodToggleInput,
@@ -113,6 +116,39 @@ export async function syncSource(source: string): Promise<void> {
 
 export const getPortfolio = (account: StockAccount = "individual") =>
   apiFetch<PortfolioResponse>(`/api/finance/portfolio?account=${account}`);
+
+export const getLoans = () => apiFetch<LoansResponse>("/api/loans");
+
+export const deleteLoan = (id: number) => apiDelete(`/api/loans/${id}`);
+
+export async function addLoan(input: LoanInput): Promise<{ id: number }> {
+  const res = await fetch("/api/loans", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<{ id: number }>;
+}
+
+export async function updateLoan(id: number, input: LoanInput): Promise<{ updated: boolean }> {
+  const res = await fetch(`/api/loans/${id}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<{ updated: boolean }>;
+}
+
+export const assignLoanMerchant = (input: LoanAssignInput) =>
+  apiPost<{ assigned: boolean }>("/api/loans/assign-merchant", input);
 
 export async function uploadHoldings(
   csv: string,
