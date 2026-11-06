@@ -11,14 +11,19 @@ import { NAV_ICONS } from "./SideNav";
 
 // One tappable row — taller than the desktop sidebar rows on purpose
 // (comfortable touch target), trailing chevron as the "drills in" affordance.
-function MenuRow({ item }: { item: NavItem }) {
+// Same bordered-chip styling as the desktop sidebar: every chip spans full
+// width, and nesting shows as an indent *inside* the chip (`depth`).
+function MenuRow({ item, depth = 0 }: { item: NavItem; depth?: number }) {
   const Icon = NAV_ICONS[item.path];
   return (
     <Link
       to={item.path}
-      className="flex items-center justify-between rounded-lg px-3 py-3 text-base text-zinc-200 active:bg-zinc-800"
+      className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-800/40 px-3 py-3 text-base text-zinc-200 active:bg-zinc-800"
     >
       <span className="flex min-w-0 items-center gap-2.5">
+        {depth > 0 && (
+          <span style={{ width: `${depth * 1.1}rem` }} className="shrink-0" aria-hidden="true" />
+        )}
         {Icon && (
           <span className="shrink-0 text-zinc-400" aria-hidden="true">
             <Icon className="h-4 w-4" />
@@ -33,16 +38,16 @@ function MenuRow({ item }: { item: NavItem }) {
   );
 }
 
-// Recursive branch: a row plus (when present) its indented children — same
-// indent-guide styling as the desktop sidebar tree, any depth.
-function MenuBranch({ item }: { item: NavItem }) {
+// Recursive branch: a row plus (when present) its children — full-width like
+// the desktop sidebar tree, with the per-depth tab marking who they belong to.
+function MenuBranch({ item, depth = 0 }: { item: NavItem; depth?: number }) {
   return (
     <li>
-      <MenuRow item={item} />
+      <MenuRow item={item} depth={depth} />
       {item.children && (
-        <ul className="ml-5 space-y-1 border-l border-zinc-700/70 pl-2">
+        <ul className="mt-1 space-y-1">
           {item.children.map((child) => (
-            <MenuBranch key={child.path} item={child} />
+            <MenuBranch key={child.path} item={child} depth={depth + 1} />
           ))}
         </ul>
       )}
