@@ -6,14 +6,12 @@ import { scoreGayDay, type DaySignals } from "./gayness";
 const day = (partial: Partial<DaySignals> = {}): DaySignals => ({
   transportation: true,
   productivityUnits: 1,
-  streaming: false,
   delivery: false,
   socialEvent: false,
   journaled: false,
   exercised: false,
   finishedBook: false,
   gayMerchant: false,
-  loanPayment: false,
   ...partial,
 });
 
@@ -24,38 +22,37 @@ describe("scoreGayDay", () => {
     expect(r.label).toBe("gay");
   });
 
-  it("doing nothing at all is super gay (the canonical spec)", () => {
+  it("doing nothing at all nets out to gay (homebody offsets the sloth)", () => {
     const r = scoreGayDay(day({ transportation: false, productivityUnits: 0 }));
+    expect(r.score).toBe(1);
+    expect(r.breakdown).toEqual([
+      { rule: "homebody", points: 1 },
+      { rule: "zero productivity", points: -1 },
+    ]);
+  });
+
+  it("grinding is camp: a heavy home commit day is super gay", () => {
+    const r = scoreGayDay(day({ transportation: false, productivityUnits: 5 }));
     expect(r.score).toBe(3);
     expect(r.label).toBe("super gay");
     expect(r.breakdown).toEqual([
       { rule: "homebody", points: 1 },
-      { rule: "zero productivity", points: 1 },
+      { rule: "heavy productivity", points: 1 },
     ]);
   });
 
-  it("doing nothing plus streaming is exceptionally gay", () => {
-    const r = scoreGayDay(day({ transportation: false, productivityUnits: 0, streaming: true }));
-    expect(r.score).toBe(4);
-    expect(r.label).toBe("exceptionally gay");
+  it("delivery drags a day down but never below 1", () => {
+    expect(scoreGayDay(day({ delivery: true, productivityUnits: 0 })).score).toBe(1);
+    const grind = day({ transportation: false, productivityUnits: 5 });
+    expect(scoreGayDay(grind).score).toBe(3);
+    expect(scoreGayDay({ ...grind, delivery: true }).score).toBe(2);
   });
 
-  it("couch + delivery + streaming maxes out, in caps", () => {
-    const r = scoreGayDay(
-      day({ transportation: false, productivityUnits: 0, streaming: true, delivery: true }),
-    );
-    expect(r.score).toBe(5);
-    expect(r.label).toBe("SUPER MEGA GAY");
-  });
-
-  it("clamps at 5 even when every positive rule fires", () => {
+  it("the full camp maximum: grind + journal + exercise + book + gay merchant", () => {
     const r = scoreGayDay(
       day({
         transportation: false,
-        productivityUnits: 0,
-        streaming: true,
-        delivery: true,
-        socialEvent: true,
+        productivityUnits: 5,
         journaled: true,
         exercised: true,
         finishedBook: true,
@@ -63,25 +60,14 @@ describe("scoreGayDay", () => {
       }),
     );
     expect(r.score).toBe(5);
+    expect(r.label).toBe("SUPER MEGA GAY");
   });
 
-  it("heavy productivity drags the day down but never below 1", () => {
-    const r = scoreGayDay(day({ productivityUnits: 5 }));
-    expect(r.score).toBe(1);
-    expect(r.breakdown).toEqual([{ rule: "heavy productivity", points: -1 }]);
-  });
-
-  it("a student loan payment knocks off a tier", () => {
-    const base = day({ transportation: false, productivityUnits: 0, streaming: true });
-    expect(scoreGayDay(base).score).toBe(4);
-    expect(scoreGayDay({ ...base, loanPayment: true }).score).toBe(3);
-  });
-
-  it("going out can also max: social event + gay merchant + no productivity", () => {
+  it("going out can also max: social event + gay merchant + grind", () => {
     const r = scoreGayDay(
-      day({ productivityUnits: 0, socialEvent: true, gayMerchant: true, delivery: true }),
+      day({ productivityUnits: 3, socialEvent: true, gayMerchant: true, journaled: true }),
     );
-    // transportation true (went out), so no homebody point: 1 + 4 = 5.
+    // transportation true (went out) so no homebody point: 1 + 4 = 5.
     expect(r.score).toBe(5);
     expect(r.label).toBe("SUPER MEGA GAY");
   });

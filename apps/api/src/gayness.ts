@@ -11,44 +11,31 @@ import { loadTxs, merchantKeyOf } from "./spending";
 // Design notes, grounded in the actual data:
 // - The dense daily signals are transactions, calendar events, and the GitHub
 //   contributions series (zeros stored); manual signals (logs, exercise) are
-//   sparse boosts. Absence of evidence is evidence of gayness: a day with no
-//   productivity and no going-out charges scores "super gay" with zero effort.
-// - The day job leaves no data trail, so workdays rate on their off-hours
-//   signals alone. Canon.
-// - Tag-driven levers need no code: merchants tagged "gay" add a point on any
-//   day they charge; the student-loan tag's merchants subtract one.
+//   sparse boosts.
+// - Grinding is camp: a heavy commit/todo day earns a point, a zero-output
+//   day loses one, and ordering delivery instead of cooking loses one. The
+//   day job leaves no data trail, so workdays rate on off-hours signals alone.
+// - Tag-driven lever, no code needed: merchants tagged "gay" add a point on
+//   any day they charge.
 
 export type DaySignals = {
   // Any TRANSPORTATION charge = left the house; its absence is the homebody point.
   transportation: boolean;
   // GitHub contributions + todos completed + (coded at all ? 1 : 0).
   productivityUnits: number;
-  streaming: boolean; // streaming-service charge (the Sex and the City clause)
-  delivery: boolean; // food delivery charge (couch economy)
-  socialEvent: boolean; // calendar event matching a going-out keyword
+  delivery: boolean; // food delivery charge; couch dinner counts against
+  socialEvent: boolean; // calendar title or journal log matching a going-out keyword
   journaled: boolean; // non-blank day log
   exercised: boolean;
   finishedBook: boolean;
   gayMerchant: boolean; // charge from a merchant carrying the "gay" tag
-  loanPayment: boolean; // student-loan payment; nothing gay about those
 };
 
-const STREAMING_MERCHANTS = [
-  "prime video",
-  "netflix",
-  "hulu",
-  "hbo",
-  "max.com",
-  "disney",
-  "spotify",
-  "paramount",
-  "peacock",
-  "crunchyroll",
-];
-
 // Word-bounded so "date" doesn't fire on "update" or "show" on "shower".
+// Matched against calendar event titles AND the day's journal log, so a
+// logged "went to trivia" counts even when it never made the calendar.
 const SOCIAL_EVENT_RE =
-  /\b(dinner|brunch|drag|pride|party|date|show|concert|wedding|movie|happy hour|karaoke)\b/i;
+  /\b(dinner|brunch|drag|pride|party|date|show|concert|wedding|movie|happy hour|karaoke|trivia)\b/i;
 
 // Food-delivery merchant keys beyond whatever carries the "doordash" tag.
 const DELIVERY_KEYS = new Set(["doordash", "grubhub", "uber eats", "postmates"]);
@@ -61,16 +48,14 @@ const normalizeTagName = (name: string) =>
 export function scoreGayDay(s: DaySignals): Pick<GaynessDay, "score" | "label" | "breakdown"> {
   const breakdown: { rule: string; points: number }[] = [];
   if (!s.transportation) breakdown.push({ rule: "homebody", points: 1 });
-  if (s.productivityUnits === 0) breakdown.push({ rule: "zero productivity", points: 1 });
-  else if (s.productivityUnits >= 3) breakdown.push({ rule: "heavy productivity", points: -1 });
-  if (s.streaming) breakdown.push({ rule: "streaming", points: 1 });
-  if (s.delivery) breakdown.push({ rule: "delivery", points: 1 });
+  if (s.productivityUnits === 0) breakdown.push({ rule: "zero productivity", points: -1 });
+  else if (s.productivityUnits >= 3) breakdown.push({ rule: "heavy productivity", points: 1 });
+  if (s.delivery) breakdown.push({ rule: "delivery", points: -1 });
   if (s.socialEvent) breakdown.push({ rule: "social event", points: 1 });
   if (s.journaled) breakdown.push({ rule: "journaled", points: 1 });
   if (s.exercised) breakdown.push({ rule: "exercise", points: 1 });
   if (s.finishedBook) breakdown.push({ rule: "finished a book", points: 1 });
   if (s.gayMerchant) breakdown.push({ rule: "gay-tagged merchant", points: 1 });
-  if (s.loanPayment) breakdown.push({ rule: "student loan payment", points: -1 });
   const raw = 1 + breakdown.reduce((n, b) => n + b.points, 0);
   const score = Math.min(5, Math.max(1, raw));
   return { score, label: GAYNESS_LABELS[score - 1], breakdown };
@@ -134,7 +119,7 @@ export async function buildGaynessScores(
           ),
         ),
       db
-        .select({ date: calendarDays.date })
+        .select({ date: calendarDays.date, log: calendarDays.log })
         .from(calendarDays)
         .where(sql`${calendarDays.log} is not null and btrim(${calendarDays.log}) <> ''`),
       db
@@ -155,14 +140,13 @@ export async function buildGaynessScores(
     return new Set(ruleRows.filter((r) => ids.has(r.tagId)).map((r) => r.merchantKey));
   };
   const gayKeys = keysForTag("gay");
-  const loanKeys = keysForTag("studentloan");
   const deliveryKeys = new Set([...DELIVERY_KEYS, ...keysForTag("doordash")]);
 
-  const chargesByDay = new Map<string, { key: string; name: string; category: string | null }[]>();
+  const chargesByDay = new Map<string, { key: string; category: string | null }[]>();
   for (const t of txs) {
     if (t.amount <= 0 || t.date < from || t.date > end) continue;
     const list = chargesByDay.get(t.date) ?? [];
-    list.push({ key: merchantKeyOf(t.name), name: t.name.toLowerCase(), category: t.category });
+    list.push({ key: merchantKeyOf(t.name), category: t.category });
     chargesByDay.set(t.date, list);
   }
 
@@ -179,6 +163,9 @@ export async function buildGaynessScores(
   const socialDays = new Set<string>();
   for (const r of calRows) {
     if (r.title && SOCIAL_EVENT_RE.test(r.title)) socialDays.add(dayOf(r.startTs));
+  }
+  for (const r of logRows) {
+    if (r.log && SOCIAL_EVENT_RE.test(r.log)) socialDays.add(r.date);
   }
 
   const logDays = new Set(logRows.map((r) => r.date));
@@ -199,14 +186,12 @@ export async function buildGaynessScores(
         (contribByDay.get(date) ?? 0) +
         (todosByDay.get(date) ?? 0) +
         ((codingByDay.get(date) ?? 0) > 0 ? 1 : 0),
-      streaming: charges.some((c) => STREAMING_MERCHANTS.some((m) => c.name.includes(m))),
       delivery: charges.some((c) => deliveryKeys.has(c.key)),
       socialEvent: socialDays.has(date),
       journaled: logDays.has(date),
       exercised: exerciseDays.has(date),
       finishedBook: bookDays.has(date),
       gayMerchant: gayKeys.size > 0 && charges.some((c) => gayKeys.has(c.key)),
-      loanPayment: charges.some((c) => loanKeys.has(c.key)),
     });
     days.push({ date, ...scored });
   }
