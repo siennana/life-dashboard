@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { BOOK_STATUSES, type BookInput, type BookRow, type BookStatus } from "@life/shared";
 import { addBook, deleteBook, getBooks, updateBook } from "../api";
 import { SlideDown } from "../components/SlideDown";
+import { Stat } from "../components/Stat";
+import { ACCENT, GRID, INK_MUTED, TipBox, useMeasuredWidth, type Tip } from "../lib/finance";
+import { PeriodHeader, periodBuckets, usePeriodNav, type PeriodBucket } from "../lib/timeframe";
 import { useInlineEdit } from "../lib/useInlineEdit";
 
 // 0.5 .. 5 in half-star steps for the rating dropdown.
@@ -269,6 +272,146 @@ function LogForm({
   );
 }
 
+type ChartBucket = PeriodBucket & { count: number };
+
+// Columns in the Bank monthly-trend style: integer count ticks on a y axis,
+// hairline grid, single accent, hover tooltip per column. Measured width so
+// text stays true-pixel in the 2/3-width tile.
+function BooksChart({ buckets }: { buckets: ChartBucket[] }) {
+  const [tip, setTip] = useState<Tip>(null);
+  const ref = useRef<SVGSVGElement>(null);
+  const { ref: boxRef, width: measured } = useMeasuredWidth<HTMLDivElement>();
+  const W = Math.max(measured, 240);
+  const H = 130;
+  const PAD_L = 24; // counts are small integers, slimmer gutter than $ charts
+  const PAD_B = 20;
+  const PAD_T = 12;
+  const plotW = W - PAD_L - 8;
+  const plotH = H - PAD_T - PAD_B;
+  const max = Math.max(...buckets.map((b) => b.count));
+  // Even integer top so the half tick is a whole book count.
+  const top = Math.max(2 * Math.ceil(max / 2), 2);
+  const ticks = [0, top / 2, top];
+  const slot = plotW / Math.max(buckets.length, 1);
+  const barW = Math.min(24, slot * 0.6);
+  const y = (v: number) => PAD_T + plotH * (1 - v / top);
+
+  return (
+    <div ref={boxRef} className="relative">
+      <TipBox tip={tip} />
+      <svg
+        ref={ref}
+        viewBox={`0 0 ${W} ${H}`}
+        className="mt-2 w-full"
+        role="img"
+        aria-label="Books read"
+      >
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={PAD_L} x2={W - 8} y1={y(t)} y2={y(t)} stroke={GRID} strokeWidth={1} />
+            <text x={PAD_L - 6} y={y(t) + 3.5} textAnchor="end" fontSize={10} fill={INK_MUTED}>
+              {t}
+            </text>
+          </g>
+        ))}
+        {buckets.map((b, i) => {
+          const cx = PAD_L + slot * i + slot / 2;
+          return (
+            <g key={b.key}>
+              {/* hit target: full slot height, wider than the bar */}
+              <rect
+                x={cx - slot / 2}
+                y={PAD_T}
+                width={slot}
+                height={plotH + PAD_B}
+                fill="transparent"
+                onPointerMove={() => {
+                  const rect = ref.current?.getBoundingClientRect();
+                  if (!rect) return;
+                  setTip({
+                    x: (cx / W) * rect.width,
+                    y: (y(b.count) / H) * rect.height,
+                    lines: [`${b.count} ${b.count === 1 ? "book" : "books"}`, b.name],
+                  });
+                }}
+                onPointerLeave={() => setTip(null)}
+              />
+              {b.count > 0 && (
+                /* 4px rounded data-end, square baseline: round top corners only */
+                <path
+                  d={`M ${cx - barW / 2} ${y(0)}
+                      L ${cx - barW / 2} ${y(b.count) + 4}
+                      Q ${cx - barW / 2} ${y(b.count)} ${cx - barW / 2 + 4} ${y(b.count)}
+                      L ${cx + barW / 2 - 4} ${y(b.count)}
+                      Q ${cx + barW / 2} ${y(b.count)} ${cx + barW / 2} ${y(b.count) + 4}
+                      L ${cx + barW / 2} ${y(0)} Z`}
+                  fill={ACCENT}
+                  style={{ pointerEvents: "none" }}
+                />
+              )}
+              <text x={cx} y={H - 6} textAnchor="middle" fontSize={10} fill={INK_MUTED}>
+                {b.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// Books completed in the viewed week / month / year, from the already-loaded
+// list (no extra fetch). Defaults to year — a month is usually 0–2 books.
+// `action` lands in the control row right of the period toggle.
+function ReadingStats({ rows, action }: { rows: BookRow[]; action?: React.ReactNode }) {
+  const nav = usePeriodNav("year");
+
+  const completions = useMemo(
+    () =>
+      rows
+        .filter((b) => b.status === "complete" && b.dateCompleted != null)
+        .map((b) => b.dateCompleted as string),
+    [rows],
+  );
+  const booksRead = useMemo(
+    () => completions.filter((d) => nav.inPeriod(d)).length,
+    [completions, nav.inPeriod],
+  );
+  const chart = useMemo(() => {
+    const b = periodBuckets(nav.period, nav.anchor, completions);
+    if (!b) return null;
+    return {
+      title: b.title,
+      buckets: b.buckets.map(
+        (bk): ChartBucket => ({
+          ...bk,
+          count: completions.filter((d) => d >= bk.start && d <= bk.end).length,
+        }),
+      ),
+    };
+  }, [completions, nav.period, nav.anchor]);
+
+  return (
+    <>
+      {/* Calendar-style control row above the card, not inside it. */}
+      <PeriodHeader nav={nav}>{action}</PeriodHeader>
+      <section className="mt-4 grid grid-cols-3 gap-3">
+        <Stat label="Books read" value={booksRead.toLocaleString()} />
+        {chart && (
+          <div className="col-span-2 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+            <div className="text-xs uppercase tracking-wide text-zinc-500">{chart.title}</div>
+            {chart.buckets.length === 0 ? (
+              <div className="mt-1 text-sm text-zinc-500">No completed books yet.</div>
+            ) : (
+              <BooksChart buckets={chart.buckets} />
+            )}
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
 export function Reading() {
   const books = useQuery({ queryKey: ["books"], queryFn: getBooks });
   const rows = books.data?.books ?? [];
@@ -280,17 +423,22 @@ export function Reading() {
     // entry button/form stay put and the table scrolls inside its own card;
     // mobile keeps the normal page scroll.
     <div className="flex flex-col md:h-[calc(100dvh-5rem)]">
-      {formOpen ? (
-        <LogForm editing={null} onDone={() => setFormOpen(false)} />
-      ) : (
-        <button
-          type="button"
-          onClick={() => setFormOpen(true)}
-          className="mt-6 self-start rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-        >
-          + Add Entry
-        </button>
-      )}
+      <ReadingStats
+        rows={rows}
+        action={
+          !formOpen && (
+            <button
+              type="button"
+              onClick={() => setFormOpen(true)}
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500"
+            >
+              + Add Entry
+            </button>
+          )
+        }
+      />
+
+      {formOpen && <LogForm editing={null} onDone={() => setFormOpen(false)} />}
 
       <section className="mt-6 flex min-h-0 flex-1 flex-col">
         {books.isPending && <p className="text-zinc-400">Loading…</p>}
