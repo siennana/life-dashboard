@@ -7,16 +7,18 @@ import {
   type ExerciseType,
 } from "@life/shared";
 import { addExercise, deleteExercise, getExercises, updateExercise } from "../api";
-import { Stat } from "../components/Stat";
 import { SlideDown } from "../components/SlideDown";
 import { durationLabel } from "../lib/duration";
+import { GRID, INK_MUTED, TipBox, useMeasuredWidth, type Tip } from "../lib/finance";
+import { TAG_HEX } from "../lib/tags";
+import {
+  localToday as today,
+  PeriodHeader,
+  periodBuckets,
+  usePeriodNav,
+  type PeriodBucket,
+} from "../lib/timeframe";
 import { useInlineEdit } from "../lib/useInlineEdit";
-
-// Local calendar date as YYYY-MM-DD (so "today" matches the user's clock, not UTC).
-function today(): string {
-  const d = new Date();
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-}
 
 const prettyDate = (d: string) =>
   new Date(`${d}T12:00:00`).toLocaleDateString(undefined, {
@@ -363,39 +365,145 @@ function LogForm({
   );
 }
 
-type Period = "week" | "month" | "year";
-const PERIODS: Period[] = ["week", "month", "year"];
+// Fixed hue per exercise type for the trend chart + legend, drawn from the
+// app's tag palette (the established categorical set — see Bank's Tag trend).
+// Skips TAG_HEX.blue: too close to sky when the two land side by side.
+const TYPE_HEX: Record<ExerciseType, string> = {
+  run: TAG_HEX.sky,
+  gym: TAG_HEX.violet,
+  yoga: TAG_HEX.emerald,
+  aerial: TAG_HEX.pink,
+  bike: TAG_HEX.red,
+  hike: TAG_HEX.amber,
+  custom: TAG_HEX.zinc,
+};
 
-// Monday-start week (matching the calendar) containing `dateStr`, as inclusive
-// YYYY-MM-DD bounds. Uses string compare on r.date, so no TZ math beyond this.
-function weekBounds(dateStr: string): { start: string; end: string } {
-  const d = new Date(`${dateStr}T12:00:00`);
-  const mondayOffset = (d.getDay() + 6) % 7; // shift JS Sun=0 so Mon=0
-  const monday = new Date(d);
-  monday.setDate(d.getDate() - mondayOffset);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  const fmt = (x: Date) =>
-    `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
-  return { start: fmt(monday), end: fmt(sunday) };
+// Grouped per-type columns in the Bank tag-trend style: one fixed hue per
+// type (color follows the entity), integer day-count ticks, cursor tooltip,
+// legend below. Types with no days anywhere in the window drop out.
+function TypeChart({ rows, buckets }: { rows: ExerciseRow[]; buckets: PeriodBucket[] }) {
+  const [tip, setTip] = useState<Tip>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const { ref: chartRef, width: measured } = useMeasuredWidth<HTMLDivElement>();
+
+  // Distinct workout days per type per bucket.
+  const counts = useMemo(
+    () =>
+      buckets.map((b) => {
+        const inB = rows.filter((r) => r.date >= b.start && r.date <= b.end);
+        const m = new Map<ExerciseType, number>();
+        for (const t of EXERCISE_TYPES)
+          m.set(t, new Set(inB.filter((r) => r.type === t).map((r) => r.date)).size);
+        return m;
+      }),
+    [rows, buckets],
+  );
+  const series = EXERCISE_TYPES.filter((t) => counts.some((m) => (m.get(t) ?? 0) > 0));
+
+  const W = Math.max(measured, 240);
+  const H = 150;
+  const PAD_L = 24; // counts are small integers, slimmer gutter than $ charts
+  const PAD_B = 20;
+  const PAD_T = 12;
+  const plotW = W - PAD_L - 8;
+  const plotH = H - PAD_T - PAD_B;
+  const max = Math.max(...counts.flatMap((m) => series.map((t) => m.get(t) ?? 0)), 0);
+  // Even integer top so the half tick is a whole day count.
+  const top = Math.max(2 * Math.ceil(max / 2), 2);
+  const ticks = [0, top / 2, top];
+  const slot = plotW / Math.max(buckets.length, 1);
+  // Each bucket's group splits the slot between the present types.
+  const groupW = Math.min(slot * 0.8, series.length * 14);
+  const eachW = groupW / Math.max(series.length, 1);
+  const barW = Math.max(eachW - 2, 2);
+
+  function showTip(e: React.PointerEvent, lines: [string, string]) {
+    const rect = boxRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTip({ x: e.clientX - rect.left, y: e.clientY - rect.top - 6, lines });
+  }
+
+  if (series.length === 0) {
+    return <div className="mt-1 text-sm text-zinc-500">No workouts in this window.</div>;
+  }
+
+  return (
+    <>
+      <div ref={boxRef} className="relative">
+        <TipBox tip={tip} />
+        <div ref={chartRef}>
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            className="mt-2 w-full"
+            role="img"
+            aria-label="Workout days per type"
+          >
+            {ticks.map((t) => {
+              const y = PAD_T + plotH * (1 - t / top);
+              return (
+                <g key={t}>
+                  <line x1={PAD_L} x2={W - 8} y1={y} y2={y} stroke={GRID} strokeWidth={1} />
+                  <text x={PAD_L - 6} y={y + 3.5} textAnchor="end" fontSize={10} fill={INK_MUTED}>
+                    {t}
+                  </text>
+                </g>
+              );
+            })}
+            {buckets.map((b, i) => {
+              const cx = PAD_L + slot * i + slot / 2;
+              return (
+                <g key={b.key}>
+                  {series.map((t, idx) => {
+                    const days = counts[i]!.get(t) ?? 0;
+                    const h = (days / top) * plotH;
+                    if (h <= 0) return null;
+                    const x = cx - groupW / 2 + idx * eachW + (eachW - barW) / 2;
+                    return (
+                      <rect
+                        key={t}
+                        x={x}
+                        y={PAD_T + plotH - h}
+                        width={barW}
+                        height={h}
+                        rx={1.5}
+                        fill={TYPE_HEX[t]}
+                        onPointerMove={(e) =>
+                          showTip(e, [`${days} ${days === 1 ? "day" : "days"}`, `${t} · ${b.name}`])
+                        }
+                        onPointerLeave={() => setTip(null)}
+                      />
+                    );
+                  })}
+                  <text x={cx} y={H - 6} textAnchor="middle" fontSize={10} fill={INK_MUTED}>
+                    {b.label}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+      {/* Legend — multi-hue chart, so every series is named. */}
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-400">
+        {series.map((t) => (
+          <span key={t} className="flex items-center gap-1.5 capitalize">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: TYPE_HEX[t] }} />
+            {t}
+          </span>
+        ))}
+      </div>
+    </>
+  );
 }
 
-// Totals over the current week / month / year, computed from the already-loaded
-// exercises (no extra fetch). Miles sums distance across all workout types.
-function ExerciseStats({ rows }: { rows: ExerciseRow[] }) {
-  const [period, setPeriod] = useState<Period>("month");
-  const localToday = today();
+// Days-per-type totals over the viewed week / month / year, computed from the
+// already-loaded exercises (no extra fetch).
+// `action` lands in the control row right of the period toggle.
+function ExerciseStats({ rows, action }: { rows: ExerciseRow[]; action?: React.ReactNode }) {
+  const nav = usePeriodNav();
 
   const stats = useMemo(() => {
-    const inPeriod =
-      period === "week"
-        ? (() => {
-            const { start, end } = weekBounds(localToday);
-            return rows.filter((r) => r.date >= start && r.date <= end);
-          })()
-        : rows.filter((r) =>
-            r.date.startsWith(period === "month" ? localToday.slice(0, 7) : localToday.slice(0, 4)),
-          );
+    const inPeriod = rows.filter((r) => nav.inPeriod(r.date));
     // Distinct days per type, most days first (ties keep the enum's order —
     // sort is stable); types with no entries in the period are omitted.
     const daysByType = EXERCISE_TYPES.map((t) => ({
@@ -404,68 +512,48 @@ function ExerciseStats({ rows }: { rows: ExerciseRow[] }) {
     }))
       .filter((x) => x.days > 0)
       .sort((a, b) => b.days - a.days);
-    return {
-      daysByType,
-      miles: inPeriod.reduce((sum, r) => sum + (r.distanceMiles ?? 0), 0),
-    };
-  }, [rows, period, localToday]);
+    return { daysByType };
+  }, [rows, nav.inPeriod]);
 
-  const periodLabel =
-    period === "week"
-      ? (() => {
-          const { start, end } = weekBounds(localToday);
-          const opts = { month: "short", day: "numeric" } as const;
-          return `${new Date(`${start}T12:00:00`).toLocaleDateString(undefined, opts)} – ${new Date(`${end}T12:00:00`).toLocaleDateString(undefined, opts)}`;
-        })()
-      : period === "month"
-        ? new Date(`${localToday}T12:00:00`).toLocaleDateString(undefined, {
-            month: "long",
-            year: "numeric",
-          })
-        : localToday.slice(0, 4);
+  const chart = useMemo(
+    () =>
+      periodBuckets(
+        nav.period,
+        nav.anchor,
+        rows.map((r) => r.date),
+      ),
+    [rows, nav.period, nav.anchor],
+  );
 
   return (
-    <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">{periodLabel}</p>
-        <div className="flex gap-0.5 rounded-lg border border-zinc-700 bg-zinc-800 p-0.5">
-          {PERIODS.map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPeriod(p)}
-              className={`rounded-md px-3 py-1 text-xs capitalize transition-colors ${
-                period === p ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-3">
+    <>
+      {/* Calendar-style control row above the card, not inside it. */}
+      <PeriodHeader nav={nav}>{action}</PeriodHeader>
+      <section className="mt-4 grid grid-cols-3 gap-3">
         {/* One tile for every type's day count (Stat's shell, grid inside). */}
-        <div className="col-span-2 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
           <div className="text-xs uppercase tracking-wide text-zinc-500">Days logged</div>
           {stats.daysByType.length === 0 ? (
             <div className="mt-1 text-lg font-semibold text-zinc-100">0</div>
           ) : (
-            <div className="mt-1 grid grid-cols-2 gap-x-6 gap-y-0.5 sm:grid-cols-3">
+            <ul className="mt-3 space-y-2">
               {stats.daysByType.map((x) => (
-                <div key={x.type} className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-sm capitalize text-zinc-400">{x.type}</span>
-                  <span className="text-lg font-semibold tabular-nums text-zinc-100">{x.days}</span>
-                </div>
+                <li key={x.type} className="flex items-center gap-3 text-sm">
+                  <span className="min-w-0 flex-1 truncate capitalize text-zinc-200">{x.type}</span>
+                  <span className="shrink-0 text-right tabular-nums text-zinc-100">{x.days}</span>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </div>
-        <Stat
-          label="Miles"
-          value={stats.miles.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-        />
-      </div>
-    </section>
+        {chart && (
+          <div className="col-span-2 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+            <div className="text-xs uppercase tracking-wide text-zinc-500">{chart.title}</div>
+            <TypeChart rows={rows} buckets={chart.buckets} />
+          </div>
+        )}
+      </section>
+    </>
   );
 }
 
@@ -480,19 +568,22 @@ export function Exercise() {
     // stats/form stay put and the table scrolls inside its own card; mobile
     // keeps the normal page scroll.
     <div className="flex flex-col md:h-[calc(100dvh-5rem)]">
-      <ExerciseStats rows={rows} />
+      <ExerciseStats
+        rows={rows}
+        action={
+          !formOpen && (
+            <button
+              type="button"
+              onClick={() => setFormOpen(true)}
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500"
+            >
+              + Add Entry
+            </button>
+          )
+        }
+      />
 
-      {formOpen ? (
-        <LogForm editing={null} onDone={() => setFormOpen(false)} />
-      ) : (
-        <button
-          type="button"
-          onClick={() => setFormOpen(true)}
-          className="mt-3 self-start rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-        >
-          + Add Entry
-        </button>
-      )}
+      {formOpen && <LogForm editing={null} onDone={() => setFormOpen(false)} />}
 
       <section className="mt-3 flex min-h-0 flex-1 flex-col">
         {exercises.isPending && <p className="text-zinc-400">Loading…</p>}
