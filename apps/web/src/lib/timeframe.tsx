@@ -36,13 +36,13 @@ export type PeriodBucket = { key: string; label: string; name: string; start: st
 // Sub-windows one level below the viewed period, as inclusive YYYY-MM-DD
 // bounds: all → years (data's first year through the anchor year), year →
 // months, month → Monday-start weeks clipped to the month (so an entry near a
-// month edge counts only in its own month). Week has no finer bucket → null.
+// month edge counts only in its own month), week → its seven days.
 // `allDates` is only consulted for the "all" span.
 export function periodBuckets(
   period: Period,
   anchor: string,
   allDates: string[],
-): { title: string; buckets: PeriodBucket[] } | null {
+): { title: string; buckets: PeriodBucket[] } {
   if (period === "all") {
     if (allDates.length === 0) return { title: "Per year", buckets: [] };
     const years = allDates.map((d) => Number(d.slice(0, 4)));
@@ -94,7 +94,21 @@ export function periodBuckets(
     }
     return { title: "Per week", buckets };
   }
-  return null;
+  // week → the anchor's Monday-start days
+  const { start } = weekBounds(anchor);
+  const buckets = Array.from({ length: 7 }, (_, i): PeriodBucket => {
+    const d = new Date(`${start}T12:00:00`);
+    d.setDate(d.getDate() + i);
+    const key = ymd(d);
+    return {
+      key,
+      label: d.toLocaleDateString(undefined, { weekday: "short" }),
+      name: shortDate(key),
+      start: key,
+      end: key,
+    };
+  });
+  return { title: "Per day", buckets };
 }
 
 export function usePeriodNav(initial: Period = "month") {

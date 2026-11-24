@@ -378,9 +378,10 @@ const TYPE_HEX: Record<ExerciseType, string> = {
   custom: TAG_HEX.zinc,
 };
 
-// Grouped per-type columns in the Bank tag-trend style: one fixed hue per
-// type (color follows the entity), integer day-count ticks, cursor tooltip,
-// legend below. Types with no days anywhere in the window drop out.
+// Stacked columns, one bar per bucket split by exercise type: one fixed hue
+// per type (color follows the entity), integer day-count ticks, cursor
+// tooltip per segment, legend below. Types with no days anywhere in the
+// window drop out.
 function TypeChart({ rows, buckets }: { rows: ExerciseRow[]; buckets: PeriodBucket[] }) {
   const [tip, setTip] = useState<Tip>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -407,15 +408,13 @@ function TypeChart({ rows, buckets }: { rows: ExerciseRow[]; buckets: PeriodBuck
   const PAD_T = 12;
   const plotW = W - PAD_L - 8;
   const plotH = H - PAD_T - PAD_B;
-  const max = Math.max(...counts.flatMap((m) => series.map((t) => m.get(t) ?? 0)), 0);
+  // Stacked columns, so the scale is the largest bucket's total days.
+  const max = Math.max(...counts.map((m) => series.reduce((s, t) => s + (m.get(t) ?? 0), 0)), 0);
   // Even integer top so the half tick is a whole day count.
   const top = Math.max(2 * Math.ceil(max / 2), 2);
   const ticks = [0, top / 2, top];
   const slot = plotW / Math.max(buckets.length, 1);
-  // Each bucket's group splits the slot between the present types.
-  const groupW = Math.min(slot * 0.8, series.length * 14);
-  const eachW = groupW / Math.max(series.length, 1);
-  const barW = Math.max(eachW - 2, 2);
+  const barW = Math.min(24, slot * 0.6);
 
   function showTip(e: React.PointerEvent, lines: [string, string]) {
     const rect = boxRef.current?.getBoundingClientRect();
@@ -451,18 +450,21 @@ function TypeChart({ rows, buckets }: { rows: ExerciseRow[]; buckets: PeriodBuck
             })}
             {buckets.map((b, i) => {
               const cx = PAD_L + slot * i + slot / 2;
+              // Segments stack bottom-up in series (enum) order with a 2px
+              // surface gap, so each type keeps a stable position in the bar.
+              let yCursor = PAD_T + plotH;
               return (
                 <g key={b.key}>
-                  {series.map((t, idx) => {
+                  {series.map((t) => {
                     const days = counts[i]!.get(t) ?? 0;
+                    if (days <= 0) return null;
                     const h = (days / top) * plotH;
-                    if (h <= 0) return null;
-                    const x = cx - groupW / 2 + idx * eachW + (eachW - barW) / 2;
-                    return (
+                    const yTop = yCursor - h;
+                    const seg = (
                       <rect
                         key={t}
-                        x={x}
-                        y={PAD_T + plotH - h}
+                        x={cx - barW / 2}
+                        y={yTop}
                         width={barW}
                         height={h}
                         rx={1.5}
@@ -473,6 +475,8 @@ function TypeChart({ rows, buckets }: { rows: ExerciseRow[]; buckets: PeriodBuck
                         onPointerLeave={() => setTip(null)}
                       />
                     );
+                    yCursor = yTop - 2;
+                    return seg;
                   })}
                   <text x={cx} y={H - 6} textAnchor="middle" fontSize={10} fill={INK_MUTED}>
                     {b.label}
@@ -546,12 +550,10 @@ function ExerciseStats({ rows, action }: { rows: ExerciseRow[]; action?: React.R
             </ul>
           )}
         </div>
-        {chart && (
-          <div className="col-span-2 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-            <div className="text-xs uppercase tracking-wide text-zinc-500">{chart.title}</div>
-            <TypeChart rows={rows} buckets={chart.buckets} />
-          </div>
-        )}
+        <div className="col-span-2 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+          <div className="text-xs uppercase tracking-wide text-zinc-500">{chart.title}</div>
+          <TypeChart rows={rows} buckets={chart.buckets} />
+        </div>
       </section>
     </>
   );

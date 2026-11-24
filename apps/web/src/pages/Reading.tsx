@@ -379,7 +379,6 @@ function ReadingStats({ rows, action }: { rows: BookRow[]; action?: React.ReactN
   );
   const chart = useMemo(() => {
     const b = periodBuckets(nav.period, nav.anchor, completions);
-    if (!b) return null;
     return {
       title: b.title,
       buckets: b.buckets.map(
@@ -397,16 +396,14 @@ function ReadingStats({ rows, action }: { rows: BookRow[]; action?: React.ReactN
       <PeriodHeader nav={nav}>{action}</PeriodHeader>
       <section className="mt-4 grid grid-cols-3 gap-3">
         <Stat label="Books read" value={booksRead.toLocaleString()} />
-        {chart && (
-          <div className="col-span-2 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-            <div className="text-xs uppercase tracking-wide text-zinc-500">{chart.title}</div>
-            {chart.buckets.length === 0 ? (
-              <div className="mt-1 text-sm text-zinc-500">No completed books yet.</div>
-            ) : (
-              <BooksChart buckets={chart.buckets} />
-            )}
-          </div>
-        )}
+        <div className="col-span-2 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+          <div className="text-xs uppercase tracking-wide text-zinc-500">{chart.title}</div>
+          {chart.buckets.length === 0 ? (
+            <div className="mt-1 text-sm text-zinc-500">No completed books yet.</div>
+          ) : (
+            <BooksChart buckets={chart.buckets} />
+          )}
+        </div>
       </section>
     </>
   );
