@@ -24,7 +24,7 @@ import {
   XIcon,
 } from "../components/icons";
 import { quietBtnClass } from "../lib/controls";
-import { money, PlaidLinkStatus } from "../lib/finance";
+import { money, PlaidLinkStatus, useMeasuredWidth } from "../lib/finance";
 import { TAG_DOT_CLASSES, TAG_HEX, TagMarks, TagPill, useTags } from "../lib/tags";
 
 // Spending dashboard (Plaid). Chart color system: spend is one measure, so
@@ -102,24 +102,6 @@ function TipBox({ tip }: { tip: Tip }) {
       <div className="text-zinc-400">{tip.lines[1]}</div>
     </div>
   );
-}
-
-// Track an element's rendered width so charts can use real pixels as their
-// viewBox width — fixed viewBox charts scale their text down with the card
-// (unreadable at half width in the side-by-side layout). 1 unit = 1 CSS px.
-// Callback-ref based so it also works for charts that mount conditionally
-// (Tag trend renders only once tags are picked — a mount-time effect never
-// saw its element and left the chart scaled up huge).
-function useMeasuredWidth<T extends HTMLElement>() {
-  const [el, setEl] = useState<T | null>(null);
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => setWidth(entries[0]!.contentRect.width));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [el]);
-  return { ref: setEl, width };
 }
 
 // --- Monthly trend: columns, selected month in accent, others gray. ---------

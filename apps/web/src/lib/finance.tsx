@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { PlaidHealth, PortfolioResponse } from "@life/shared";
 import { Stat } from "../components/Stat";
@@ -134,6 +134,22 @@ export function TipBox({ tip }: { tip: Tip }) {
       <div className="text-zinc-400">{tip.lines[1]}</div>
     </div>
   );
+}
+
+// Track an element's rendered width so charts can use real pixels as their
+// viewBox width — fixed viewBox charts scale their text down with the card
+// (unreadable at half width in side-by-side layouts). 1 unit = 1 CSS px.
+// Callback-ref based so it also works for charts that mount conditionally.
+export function useMeasuredWidth<T extends HTMLElement>() {
+  const [el, setEl] = useState<T | null>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => setWidth(entries[0]!.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return { ref: setEl, width };
 }
 
 // Round gridline values for a non-zero-baseline value range.
