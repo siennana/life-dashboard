@@ -36,7 +36,8 @@ import {
 } from "./loans";
 import { syncGithub } from "./connectors/github";
 import { syncWakatime } from "./connectors/wakatime";
-import { getUiSettings, saveUiSettings } from "./settings";
+import { getSyncSettings, getUiSettings, saveSyncSettings, saveUiSettings } from "./settings";
+import { shouldSync } from "./syncPolicy";
 import {
   createTag,
   deleteTag,
@@ -58,11 +59,13 @@ import {
   recurringSeriesInputSchema,
   saveDayLogInputSchema,
   stockAccountSchema,
+  syncSettingsSchema,
   eventTagToggleInputSchema,
   tagCreateInputSchema,
   tagToggleInputSchema,
   tagUpdateInputSchema,
   uiSettingsSchema,
+  type SyncMode,
   type SyncProcess,
   type SyncProcessStatus,
 } from "@life/shared";
@@ -92,6 +95,22 @@ app.addHook("onRequest", async (req, reply) => {
   if (req.headers.authorization !== `Bearer ${config.apiToken}`) {
     return reply.code(401).send({ error: "unauthorized" });
   }
+  // An authenticated request = the dashboard is in use; "active" sync mode
+  // keys off this. Also the moment to do deferred DB-touching housekeeping
+  // (Neon is being woken by this request anyway): refresh the cached sync
+  // mode if stale, and fire a catch-up cycle if the loop has been idle — so
+  // the first page view after an idle stretch gets fresh data now, not up to
+  // five minutes later.
+  lastActivityAt = Date.now();
+  if (db && Date.now() - syncModeAt > SYNC_INTERVAL_MS) void refreshSyncMode();
+  if (
+    db &&
+    syncMode === "active" &&
+    !syncing &&
+    (lastCycleAt == null || Date.now() - lastCycleAt > SYNC_INTERVAL_MS)
+  ) {
+    setImmediate(() => void syncTick());
+  }
 });
 
 app.get("/health", async () => {
@@ -117,6 +136,34 @@ function clockCadence(ms: number): string {
 }
 const CADENCE_INTERVAL = clockCadence(SYNC_INTERVAL_MS);
 
+// Sync-mode state (Settings > Sync, stored in the `settings` table). The mode
+// is CACHED IN MEMORY, deliberately: in "active" mode an idle tick must make
+// zero DB queries or Neon's compute never reaches its 5-minute autosuspend -
+// the entire point of the mode (the free plan's 100 CU-hours/month die in ~16
+// days of an always-awake compute). The cache refreshes only when the DB is
+// being touched anyway: on boot, on save, when a cycle runs, and lazily on
+// authenticated requests - which is also how the OTHER machine's API picks up
+// a mode change (both APIs share the Neon `settings` row).
+let syncMode: SyncMode = syncSettingsSchema.parse({}).mode;
+let syncModeAt = 0; // when the cache was last refreshed from the DB
+let lastActivityAt: number | null = null; // last authenticated /api request
+let lastCycleAt: number | null = null; // last completed full sync cycle
+
+async function refreshSyncMode() {
+  if (!db) return;
+  try {
+    syncMode = (await getSyncSettings(db)).mode;
+    syncModeAt = Date.now();
+  } catch (err) {
+    app.log.error({ err }, "sync settings read failed; keeping cached mode");
+  }
+}
+
+// What the status widget's Interval column shows for loop-driven rows.
+function loopCadence(): string {
+  return syncMode === "auto" ? CADENCE_INTERVAL : syncMode === "active" ? "on use" : "manual";
+}
+
 // Registry of every automated/background process the Sync status widget tracks:
 // display label, connection type, cadence, whether this machine is configured
 // for it, and its sync_runs source key. Order = display order (after the DB row).
@@ -128,22 +175,25 @@ type ProcessDef = {
   configured: boolean;
 };
 function processDefs(): ProcessDef[] {
+  // Loop-driven rows show the live loop cadence, which follows the sync mode
+  // ("0:05:00" / "on use" / "manual") so a stale Last sync is explained.
+  const loop = loopCadence();
   return [
-    { key: "todoist", label: "Todoist", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.todoistApiToken) },
-    { key: "calendar", label: "CalDAV", type: "CalDAV", cadence: CADENCE_INTERVAL, configured: Boolean(config.icloudEmail && config.icloudAppPassword) },
-    { key: "plaid", label: "Plaid", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidUsBankAccessToken) },
-    { key: "nm", label: "Northwestern Mutual", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidNmAccessToken) },
-    { key: "github", label: "GitHub", type: "GraphQL API", cadence: CADENCE_INTERVAL, configured: Boolean(config.githubToken) },
-    { key: "wakatime", label: "WakaTime", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.wakatimeApiKey) },
+    { key: "todoist", label: "Todoist", type: "REST API", cadence: loop, configured: Boolean(config.todoistApiToken) },
+    { key: "calendar", label: "CalDAV", type: "CalDAV", cadence: loop, configured: Boolean(config.icloudEmail && config.icloudAppPassword) },
+    { key: "plaid", label: "Plaid", type: "REST API", cadence: loop, configured: Boolean(plaidCreds() && config.plaidUsBankAccessToken) },
+    { key: "nm", label: "Northwestern Mutual", type: "REST API", cadence: loop, configured: Boolean(plaidCreds() && config.plaidNmAccessToken) },
+    { key: "github", label: "GitHub", type: "GraphQL API", cadence: loop, configured: Boolean(config.githubToken) },
+    { key: "wakatime", label: "WakaTime", type: "REST API", cadence: loop, configured: Boolean(config.wakatimeApiKey) },
     // Both hit only by the market snapshot, which is gated on the Finnhub key.
-    { key: "finnhub", label: "Finnhub", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
-    { key: "yahoo", label: "Yahoo Finance", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(config.finnhubApiKey) },
+    { key: "finnhub", label: "Finnhub", type: "REST API", cadence: loop, configured: Boolean(config.finnhubApiKey) },
+    { key: "yahoo", label: "Yahoo Finance", type: "REST API", cadence: loop, configured: Boolean(config.finnhubApiKey) },
     // Fidelity flips from manual CSV to an automated Plaid pull once its
     // investments item is linked; that same item also feeds the FactSet 401k.
     ...(plaidCreds() && config.plaidFidelityAccessToken
-      ? [{ key: "fidelity", label: "Fidelity", type: "REST API", cadence: CADENCE_INTERVAL, configured: true }]
+      ? [{ key: "fidelity", label: "Fidelity", type: "REST API", cadence: loop, configured: true }]
       : [{ key: "fidelity", label: "Fidelity", type: "CSV upload", cadence: "manual", configured: true }]),
-    { key: "factset", label: "FactSet 401k", type: "REST API", cadence: CADENCE_INTERVAL, configured: Boolean(plaidCreds() && config.plaidFidelityAccessToken) },
+    { key: "factset", label: "FactSet 401k", type: "REST API", cadence: loop, configured: Boolean(plaidCreds() && config.plaidFidelityAccessToken) },
   ];
 }
 
@@ -196,7 +246,7 @@ app.get("/api/status", async (_req, reply) => {
     }),
   ];
 
-  return { processes };
+  return { processes, syncMode };
 });
 
 app.get("/api/todos", async (_req, reply) => {
@@ -437,6 +487,23 @@ app.put("/api/settings/ui", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   const value = uiSettingsSchema.parse(req.body);
   return saveUiSettings(db, value);
+});
+
+// Sync mode (Settings > Sync): auto / active / manual. Saving updates this
+// API's in-memory cache immediately; the other machine's API picks the change
+// up lazily (see the cache's comment near loopCadence).
+app.get("/api/settings/sync", async (_req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  return getSyncSettings(db);
+});
+
+app.put("/api/settings/sync", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const value = syncSettingsSchema.parse(req.body);
+  const saved = await saveSyncSettings(db, value);
+  syncMode = saved.mode;
+  syncModeAt = Date.now();
+  return saved;
 });
 
 // Plaid credentials from .env, or null until both keys are set.
@@ -771,6 +838,8 @@ app.post("/api/sync", async (_req, reply) => {
   for (const source of SYNCABLE_SOURCES) {
     results[source] = await runConnector(db, source).catch((err) => ({ error: String(err) }));
   }
+  // Counts as a full cycle for "active" mode's daily catch-up bookkeeping.
+  lastCycleAt = Date.now();
   return results;
 });
 
@@ -816,10 +885,26 @@ app.listen({ port: config.port, host: "0.0.0.0" }).catch((err) => {
   process.exit(1);
 });
 
-// Pull-based connectors: sync on boot, then every 5 minutes (SYNC_INTERVAL_MS,
-// defined up by the status route). Each configured connector runs independently
-// — one failing must not block the others.
+// Pull-based connectors. The interval always ticks, but syncTick consults the
+// sync mode first (shouldSync in syncPolicy.ts): "auto" runs every tick,
+// "active" only while the dashboard is in use (+ one catch-up cycle a day),
+// "manual" never. An idle tick returns before touching the DB so Neon's
+// compute can autosuspend. Each configured connector runs independently —
+// one failing must not block the others.
 let syncing = false;
+async function syncTick() {
+  if (!db || syncing) return;
+  const decide = () =>
+    shouldSync({ mode: syncMode, now: Date.now(), lastActivityAt, lastCycleAt });
+  if (!decide()) return;
+  // About to touch the DB anyway — re-read the mode first so a switch made on
+  // the other machine (shared settings row) is honored before syncing.
+  await refreshSyncMode();
+  if (!decide()) return;
+  await runSyncs();
+  lastCycleAt = Date.now();
+}
+
 async function runSyncs() {
   const activeDb = db;
   if (syncing || !activeDb) return;
@@ -897,5 +982,10 @@ async function runSyncs() {
     syncing = false;
   }
 }
-void runSyncs();
-setInterval(runSyncs, SYNC_INTERVAL_MS);
+// Boot: load the stored mode, then let the policy decide the first cycle
+// ("auto" and a fresh boot in "active" both sync once; "manual" stays quiet).
+void (async () => {
+  await refreshSyncMode();
+  await syncTick();
+})();
+setInterval(() => void syncTick(), SYNC_INTERVAL_MS);

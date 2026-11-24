@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { UI_FONTS, UI_THEMES, type UiFont, type UiSettings, type UiTheme } from "@life/shared";
-import { saveUiSettings } from "../api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  SYNC_MODES,
+  UI_FONTS,
+  UI_THEMES,
+  type SyncMode,
+  type UiFont,
+  type UiSettings,
+  type UiTheme,
+} from "@life/shared";
+import { getSyncSettings, saveSyncSettings, saveUiSettings } from "../api";
 import { applyUiSettings, UI_SETTINGS_QUERY_KEY, useUiSettings } from "../lib/settings";
 
 const FONT_LABELS: Record<UiFont, string> = {
@@ -27,11 +35,11 @@ const LINE_HEIGHT_MAX = 1.6;
 const fieldClass =
   "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none";
 
-// Panel registry: one entry per settings panel so more (sync, data, ...) can
-// slot in later without touching the page shell.
-const PANELS = ["style"] as const;
+// Panel registry: one entry per settings panel so more (data, ...) can slot
+// in later without touching the page shell.
+const PANELS = ["style", "sync"] as const;
 type Panel = (typeof PANELS)[number];
-const PANEL_LABELS: Record<Panel, string> = { style: "Style" };
+const PANEL_LABELS: Record<Panel, string> = { style: "Style", sync: "Sync" };
 
 function StylePanel() {
   const queryClient = useQueryClient();
@@ -187,6 +195,97 @@ function StylePanel() {
   );
 }
 
+// Sync-loop behavior. Radio per mode with the trade-off spelled out; saving
+// applies on this machine's API immediately (the other machine picks it up
+// on its next DB touch). Stored in the shared settings table, so one choice
+// governs both machines.
+const SYNC_MODE_INFO: Record<SyncMode, { label: string; detail: string }> = {
+  auto: {
+    label: "Automatic",
+    detail: "Sync every 5 minutes whenever dev is running. Keeps Neon's compute awake 24/7 — burns the free plan's monthly allowance in about 16 days.",
+  },
+  active: {
+    label: "Active use (default)",
+    detail: "Sync only while the dashboard is being used, plus one catch-up cycle a day so daily series (portfolio value, GitHub contributions) never gap. Neon sleeps the rest of the time.",
+  },
+  manual: {
+    label: "Manual",
+    detail: "No background syncing at all — only the sync buttons on the status widget and Todos page. Daily series gap on days you don't sync.",
+  },
+};
+
+function SyncPanel() {
+  const stored = useQuery({ queryKey: ["sync-settings"], queryFn: getSyncSettings });
+  const queryClient = useQueryClient();
+  const [mode, setMode] = useState<SyncMode>("active");
+  const [savedNote, setSavedNote] = useState(false);
+
+  useEffect(() => {
+    if (stored.data) setMode(stored.data.mode);
+  }, [stored.data]);
+
+  const save = useMutation({
+    mutationFn: () => saveSyncSettings({ mode }),
+    onSuccess: (value) => {
+      queryClient.setQueryData(["sync-settings"], value);
+      // The status widget's Interval column shows the mode.
+      queryClient.invalidateQueries({ queryKey: ["status"] });
+      setSavedNote(true);
+    },
+  });
+
+  const dirty = stored.data != null && mode !== stored.data.mode;
+
+  return (
+    <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+      <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Sync</h2>
+      <p className="mt-2 max-w-xl text-xs text-zinc-500">
+        When the API pulls from Todoist, iCloud, Plaid, GitHub, WakaTime, and the market data
+        providers. One setting for both machines (shared database).
+      </p>
+      <div className="mt-3 max-w-xl space-y-2">
+        {SYNC_MODES.map((m) => (
+          <label
+            key={m}
+            className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${
+              mode === m ? "border-zinc-600 bg-zinc-800/60" : "border-zinc-800 hover:bg-zinc-800/30"
+            }`}
+          >
+            <input
+              type="radio"
+              name="sync-mode"
+              checked={mode === m}
+              onChange={() => {
+                setMode(m);
+                setSavedNote(false);
+              }}
+              className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-pointer border-zinc-600 bg-zinc-900 text-blue-500 focus:ring-0"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm text-zinc-100">{SYNC_MODE_INFO[m].label}</span>
+              <span className="mt-0.5 block text-xs text-zinc-500">{SYNC_MODE_INFO[m].detail}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => save.mutate()}
+          disabled={save.isPending || stored.isPending || !dirty}
+          className="cursor-pointer rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+        {savedNote && !dirty && <span className="text-sm text-emerald-400">Saved</span>}
+        {save.isError && (
+          <span className="text-sm text-red-400">{(save.error as Error).message}</span>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function Settings() {
   const [panel, setPanel] = useState<Panel>("style");
 
@@ -214,7 +313,10 @@ export function Settings() {
             ))}
           </ul>
         </nav>
-        <div className="min-w-0 flex-1">{panel === "style" && <StylePanel />}</div>
+        <div className="min-w-0 flex-1">
+          {panel === "style" && <StylePanel />}
+          {panel === "sync" && <SyncPanel />}
+        </div>
       </div>
     </>
   );

@@ -25,8 +25,26 @@ export const syncProcessSchema = z.object({
 });
 export type SyncProcess = z.infer<typeof syncProcessSchema>;
 
+// When the background sync loop runs (Settings > Sync, stored in `settings`
+// under key "sync"). "auto" = every interval while the API is up; "active" =
+// only while the dashboard is actually being used (any authenticated API
+// request in the last few minutes), plus one catch-up cycle a day so daily
+// series (portfolio value, contributions) never gap; "manual" = only the
+// sync buttons. Default "active" — the whole point is letting Neon's compute
+// suspend while dev idles 24/7.
+export const SYNC_MODES = ["auto", "active", "manual"] as const;
+export const syncModeSchema = z.enum(SYNC_MODES);
+export type SyncMode = z.infer<typeof syncModeSchema>;
+
+export const syncSettingsSchema = z.object({
+  mode: syncModeSchema.default("active"),
+});
+export type SyncSettings = z.infer<typeof syncSettingsSchema>;
+
 export const statusResponseSchema = z.object({
   processes: z.array(syncProcessSchema),
+  // The loop's current mode, so the widget can say why rows look stale.
+  syncMode: syncModeSchema.optional(),
 });
 export type StatusResponse = z.infer<typeof statusResponseSchema>;
 

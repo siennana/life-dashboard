@@ -59,7 +59,14 @@ export function SyncStatus() {
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Sync status</h2>
         {status.isSuccess && (
-          <span className="text-xs text-zinc-500">read {status.data.loadMs} ms</span>
+          <span className="text-xs text-zinc-500">
+            {/* The loop's mode (Settings > Sync) — explains stale Last sync
+                times in active/manual modes. */}
+            {status.data.syncMode && status.data.syncMode !== "auto" && (
+              <span className="mr-3 text-zinc-400">sync: {status.data.syncMode}</span>
+            )}
+            read {status.data.loadMs} ms
+          </span>
         )}
       </div>
       {status.isPending && <p className="mt-3 text-zinc-400">Connecting…</p>}

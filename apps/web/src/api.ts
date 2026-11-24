@@ -26,6 +26,7 @@ import type {
   SpendingDashboard,
   StatusResponse,
   StockAccount,
+  SyncSettings,
   Tag,
   TagsResponse,
   TagUpdateInput,
@@ -189,6 +190,21 @@ export const getWeather = (force = false) =>
   apiFetch<WeatherResponse>(`/api/weather${force ? "?force=true" : ""}`);
 
 export const getUiSettings = () => apiFetch<UiSettings>("/api/settings/ui");
+
+export const getSyncSettings = () => apiFetch<SyncSettings>("/api/settings/sync");
+
+export async function saveSyncSettings(value: SyncSettings): Promise<SyncSettings> {
+  const res = await fetch("/api/settings/sync", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${import.meta.env.VITE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(value),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json() as Promise<SyncSettings>;
+}
 
 export async function saveUiSettings(value: UiSettings): Promise<UiSettings> {
   const res = await fetch("/api/settings/ui", {
