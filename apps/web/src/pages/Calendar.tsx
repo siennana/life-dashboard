@@ -3,13 +3,14 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   getCalendarLastUpdated,
   getCashflow,
+  getGayness,
   getGithubCommits,
   getLoggedDays,
   getWeather,
   togglePeriodDay,
 } from "../api";
 import { useTags } from "../lib/tags";
-import type { CashflowDay, Tag } from "@life/shared";
+import type { CashflowDay, GaynessDay, Tag } from "@life/shared";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
 import {
   BloodDropIcon,
@@ -20,6 +21,7 @@ import {
   PencilIcon,
 } from "../components/icons";
 import { useEventTagMenu } from "../components/EventTagMenu";
+import { GayRainbow } from "../components/GayRainbow";
 import { quietBtnClass } from "../lib/controls";
 import { weatherEmoji } from "../lib/weather";
 import { usePeriodDays } from "../lib/period";
@@ -65,6 +67,10 @@ const dayTitle = (key: string) => {
   const [y, m, d] = key.split("-").map(Number);
   return `${d} ${MONTHS[m - 1]} ${y}`;
 };
+
+// Gay-view cell tooltip: the label plus the receipts ("+1 homebody", ...).
+const gayTitle = (g: GaynessDay) =>
+  [g.label, ...g.breakdown.map((b) => `${b.points > 0 ? "+" : ""}${b.points} ${b.rule}`)].join("\n");
 
 // True when a click landed on an interactive control, so container-level
 // "click empty space to collapse" handlers leave it alone.
@@ -367,6 +373,8 @@ type StoredCalendarFilters = {
   // Whether the two collapsible tag checklists are expanded.
   eventTagsOpen: boolean;
   cashflowTagsOpen: boolean;
+  // Gay view: cells show only the day number + the gayness rainbow/label.
+  gayView: boolean;
 };
 
 function readStoredFilters(): Partial<StoredCalendarFilters> {
@@ -483,6 +491,9 @@ export function CalendarPage() {
   // swallow the dropdown; open state persists with the rest of the filters.
   const [eventTagsOpen, setEventTagsOpen] = useState(stored.eventTagsOpen ?? false);
   const [cashflowTagsOpen, setCashflowTagsOpen] = useState(stored.cashflowTagsOpen ?? false);
+  // Gay view replaces every cell's content with the day's gayness rating —
+  // no other data, per spec. Its own toggle button, not a filter checkbox.
+  const [gayView, setGayView] = useState(stored.gayView ?? false);
   const tagsQuery = useTags();
   const tagList = tagsQuery.data?.tags ?? [];
 
@@ -533,6 +544,7 @@ export function CalendarPage() {
         hiddenEventTags: [...hiddenEventTags],
         eventTagsOpen,
         cashflowTagsOpen,
+        gayView,
       } satisfies StoredCalendarFilters),
     );
   }, [
@@ -549,6 +561,7 @@ export function CalendarPage() {
     hiddenEventTags,
     eventTagsOpen,
     cashflowTagsOpen,
+    gayView,
   ]);
 
   // Commit days for the datalet mark — shares the ["github-commits"] query
@@ -675,6 +688,22 @@ export function CalendarPage() {
   }, [year, month]);
   const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
 
+  // Gay view's per-day scores for the visible 6x7 grid, fetched only while
+  // the view is on. The API clips to today (future days have no data).
+  const gridFrom = cellKey(weeks[0][0]);
+  const gridTo = cellKey(weeks[5][6]);
+  const gayness = useQuery({
+    queryKey: ["gayness", gridFrom, gridTo],
+    queryFn: () => getGayness(gridFrom, gridTo),
+    enabled: gayView,
+    placeholderData: keepPreviousData,
+  });
+  const gaynessByDay = useMemo(() => {
+    const map = new Map<string, GaynessDay>();
+    for (const d of gayness.data?.days ?? []) map.set(d.date, d);
+    return map;
+  }, [gayness.data]);
+
   function openSelection(wi: number, a: number, b: number) {
     const keys = weeks[wi].slice(a, b + 1).map(cellKey);
     setExpandedWeek(wi);
@@ -692,6 +721,8 @@ export function CalendarPage() {
     else openDaySingle(wi, key);
   }
   function handleCellClick(wi: number, key: string) {
+    // Gay view is cells-only: no day/week expansion, just rainbows.
+    if (gayView) return;
     if (!suppressClickRef.current) cellClick(wi, key);
   }
 
@@ -701,6 +732,7 @@ export function CalendarPage() {
   // cell comes from elementFromPoint (not enter events) because touch pointer
   // events stay captured on the cell where the gesture started.
   function beginDrag(e: React.PointerEvent, wi: number, di: number) {
+    if (gayView) return; // no drag selection either — see handleCellClick
     if (dragRef.current) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const isTouch = e.pointerType !== "mouse";
@@ -990,27 +1022,59 @@ export function CalendarPage() {
                           cell.inMonth ? "bg-zinc-900" : "bg-zinc-950/60"
                         }`}
                       >
-                        <CornerMarks
-                          period={showHealth && periodDays.has(key)}
-                          exercise={showExerciseMark && hasExercise(key)}
-                        commits={showCommitsMark && hasCommits(key)}
-                        logged={showLoggedMark && hasLog(key)}
-                        />
+                        {!gayView && (
+                          <CornerMarks
+                            period={showHealth && periodDays.has(key)}
+                            exercise={showExerciseMark && hasExercise(key)}
+                            commits={showCommitsMark && hasCommits(key)}
+                            logged={showLoggedMark && hasLog(key)}
+                          />
+                        )}
                         <span title={dayTitle(key)} className={dayNum(key, cell.inMonth, false)}>
                           {cell.day}
                         </span>
-                        {dayBadges(key, true)}
-                        {(dayEvents.length > 0 || entries.length > 0) && (
-                          // Apple-style dots instead of text chips: violet =
-                          // events, blue = exercises (capped, no counts).
-                          <span className="flex shrink-0 items-center gap-0.5">
-                            {dayEvents.slice(0, 3).map((_, i) => (
-                              <span key={`e${i}`} className="h-1 w-1 rounded-full bg-violet-400" />
-                            ))}
-                            {entries.slice(0, 2).map((_, i) => (
-                              <span key={`x${i}`} className="h-1 w-1 rounded-full bg-blue-400" />
-                            ))}
-                          </span>
+                        {gayView ? (
+                          // Gay view: rainbow + label only (see the desktop
+                          // grid for the full comment).
+                          (() => {
+                            const gd = gaynessByDay.get(key);
+                            return gd ? (
+                              <span
+                                title={gayTitle(gd)}
+                                className={`flex min-h-0 flex-1 flex-col items-center justify-center ${
+                                  cell.inMonth ? "" : "opacity-50"
+                                }`}
+                              >
+                                <GayRainbow score={gd.score} className="h-6 w-12 max-w-full" />
+                                {/* 7px: "exceptionally" must fit a ~50px cell. */}
+                                <span
+                                  className={`text-center text-[7px] leading-tight ${
+                                    gd.score === 5
+                                      ? "font-semibold text-zinc-100"
+                                      : "text-zinc-400"
+                                  }`}
+                                >
+                                  {gd.label}
+                                </span>
+                              </span>
+                            ) : null;
+                          })()
+                        ) : (
+                          <>
+                            {dayBadges(key, true)}
+                            {(dayEvents.length > 0 || entries.length > 0) && (
+                              // Apple-style dots instead of text chips: violet =
+                              // events, blue = exercises (capped, no counts).
+                              <span className="flex shrink-0 items-center gap-0.5">
+                                {dayEvents.slice(0, 3).map((_, i) => (
+                                  <span key={`e${i}`} className="h-1 w-1 rounded-full bg-violet-400" />
+                                ))}
+                                {entries.slice(0, 2).map((_, i) => (
+                                  <span key={`x${i}`} className="h-1 w-1 rounded-full bg-blue-400" />
+                                ))}
+                              </span>
+                            )}
+                          </>
                         )}
                       </button>
                     );
@@ -1284,6 +1348,21 @@ export function CalendarPage() {
             </div>
           )}
         </div>
+        {/* Gay view toggle: the whole grid flips to day number + gayness
+            rainbow only. Collapses any expansion — gay view is cells-only. */}
+        <button
+          type="button"
+          onClick={() => {
+            setGayView((v) => !v);
+            collapseAll();
+          }}
+          aria-label={gayView ? "Exit gay view" : "Gay view"}
+          aria-pressed={gayView}
+          title="Gay view"
+          className={`flex items-center ${quietBtnClass} ${gayView ? "bg-zinc-800" : ""}`}
+        >
+          <GayRainbow score={5} className={`h-3 w-6 ${gayView ? "" : "opacity-60"}`} />
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -1456,9 +1535,11 @@ export function CalendarPage() {
                     const isDaySqueezed = isExpanded && expandedDay !== null && !isDayExpanded;
                     const dayNumberClass = dayNum(key, cell.inMonth, isCompressed || isDaySqueezed);
                     // Weather (current-week forecast) then cashflow, right-aligned.
-                    const rightBadges = !isCompressed && !isDaySqueezed && (
+                    // Gay view hides them — cells carry only the rating.
+                    const rightBadges = !gayView && !isCompressed && !isDaySqueezed && (
                       <span className="flex min-w-0 items-center gap-1.5">{dayBadges(key)}</span>
                     );
+                    const gayDay = gayView ? gaynessByDay.get(key) : undefined;
 
                     // The expanded day hosts a form with real inputs (the log
                     // textarea), which can't safely live inside a <button> — so
@@ -1543,8 +1624,8 @@ export function CalendarPage() {
                         }`}
                       >
                         {/* Corner marks hide in compressed/squeezed cells, same
-                            as the weather/cashflow badges. */}
-                        {!isCompressed && !isDaySqueezed && (
+                            as the weather/cashflow badges — and in gay view. */}
+                        {!gayView && !isCompressed && !isDaySqueezed && (
                           <CornerMarks
                             period={showHealth && periodDays.has(key)}
                             exercise={showExerciseMark && hasExercise(key)}
@@ -1569,13 +1650,42 @@ export function CalendarPage() {
                           </span>
                           {rightBadges}
                         </div>
-                        <DayChips
-                          dayEvents={dayEvents}
-                          entries={entries}
-                          onEventContextMenu={openEventMenu}
-                        />
-                        {!isCompressed && !isDaySqueezed && logSnippets[key] && (
-                          <LogPreview text={logSnippets[key]} />
+                        {gayView ? (
+                          // Just the rainbow: rings fill with the score, label
+                          // beneath, breakdown in the tooltip. Days without a
+                          // score (future / pre-history) stay bare.
+                          gayDay &&
+                          !isCompressed &&
+                          !isDaySqueezed && (
+                            <span
+                              title={gayTitle(gayDay)}
+                              className={`flex min-h-0 flex-1 flex-col items-center justify-center gap-1 ${
+                                cell.inMonth ? "" : "opacity-50"
+                              }`}
+                            >
+                              <GayRainbow score={gayDay.score} className="h-10 w-20 max-w-full" />
+                              <span
+                                className={`px-0.5 text-center text-[10px] leading-tight ${
+                                  gayDay.score === 5
+                                    ? "font-bold text-zinc-100"
+                                    : "text-zinc-400"
+                                }`}
+                              >
+                                {gayDay.label}
+                              </span>
+                            </span>
+                          )
+                        ) : (
+                          <>
+                            <DayChips
+                              dayEvents={dayEvents}
+                              entries={entries}
+                              onEventContextMenu={openEventMenu}
+                            />
+                            {!isCompressed && !isDaySqueezed && logSnippets[key] && (
+                              <LogPreview text={logSnippets[key]} />
+                            )}
+                          </>
                         )}
                       </button>
                     );

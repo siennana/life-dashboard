@@ -11,6 +11,7 @@ import type {
   ExerciseInput,
   ExerciseRow,
   ExercisesResponse,
+  GaynessResponse,
   GithubCommitsResponse,
   GithubReposResponse,
   LoanAssignInput,
@@ -272,6 +273,9 @@ export async function updateExercise(id: number, input: ExerciseInput): Promise<
 }
 
 export const getPeriods = () => apiFetch<PeriodsResponse>("/api/period");
+
+export const getGayness = (from: string, to: string) =>
+  apiFetch<GaynessResponse>(`/api/gayness?from=${from}&to=${to}`);
 
 export async function togglePeriodDay(input: PeriodToggleInput): Promise<PeriodToggleResult> {
   const res = await fetch("/api/period/toggle", {

@@ -322,6 +322,32 @@ export const periodsResponseSchema = z.object({
 });
 export type PeriodsResponse = z.infer<typeof periodsResponseSchema>;
 
+// Gayness monitor - every day gets a 1-5 rating computed at read time from
+// signals already in the DB (transactions, productivity metrics, calendar
+// events, day logs); nothing new is stored, so rubric tweaks re-score all
+// history. Labels index as score - 1; the top tier is uppercase on purpose.
+export const GAYNESS_LABELS = [
+  "gay",
+  "pretty gay",
+  "super gay",
+  "exceptionally gay",
+  "SUPER MEGA GAY",
+] as const;
+
+export const gaynessDaySchema = z.object({
+  date: z.string(), // YYYY-MM-DD
+  score: z.number().int().min(1).max(5),
+  label: z.string(),
+  // The rules that fired and their point contributions (breakdown tooltip).
+  breakdown: z.array(z.object({ rule: z.string(), points: z.number() })),
+});
+export type GaynessDay = z.infer<typeof gaynessDaySchema>;
+
+export const gaynessResponseSchema = z.object({
+  days: z.array(gaynessDaySchema),
+});
+export type GaynessResponse = z.infer<typeof gaynessResponseSchema>;
+
 // Bank spending via Plaid (read-only). Transactions land in `events` (source
 // "plaid"); amounts follow Plaid's sign convention: positive = money out.
 export const plaidExchangeInputSchema = z.object({

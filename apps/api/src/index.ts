@@ -11,6 +11,7 @@ import { createBook, deleteBook, listBooks, updateBook } from "./books";
 import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
 import { listPeriodDays, togglePeriodDay } from "./period";
+import { buildGaynessScores } from "./gayness";
 import { getDayLog, getLastUpdated, getLoggedDays, saveDayLog } from "./calendarDay";
 import {
   buildDailyCashflow,
@@ -748,6 +749,17 @@ app.post("/api/period/toggle", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   const { date } = periodToggleInputSchema.parse(req.body);
   return togglePeriodDay(db, date);
+});
+
+// Gayness monitor: a 1-5 rating per day in [from..to], computed at read time
+// from existing signals (gayness.ts) - nothing stored, rubric tweaks re-score
+// all history. Powers the calendar's gay view.
+app.get("/api/gayness", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const { from, to } = req.query as { from?: string; to?: string };
+  if (!from || !to || !DATE_PARAM.test(from) || !DATE_PARAM.test(to))
+    return reply.code(400).send({ error: "invalid range - expected from=YYYY-MM-DD&to=YYYY-MM-DD" });
+  return buildGaynessScores(db, from, to, localDay());
 });
 
 // Exercise: manually log a workout / list all logged workouts.
