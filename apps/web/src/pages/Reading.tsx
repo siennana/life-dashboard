@@ -276,20 +276,23 @@ export function Reading() {
   const [formOpen, setFormOpen] = useState(false);
 
   return (
-    <>
+    // Desktop pins the page to the viewport (main's py-10 = 5rem) so the
+    // entry button/form stay put and the table scrolls inside its own card;
+    // mobile keeps the normal page scroll.
+    <div className="flex flex-col md:h-[calc(100dvh-5rem)]">
       {formOpen ? (
         <LogForm editing={null} onDone={() => setFormOpen(false)} />
       ) : (
         <button
           type="button"
           onClick={() => setFormOpen(true)}
-          className="mt-6 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+          className="mt-6 self-start rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
         >
           + Add Entry
         </button>
       )}
 
-      <section className="mt-6">
+      <section className="mt-6 flex min-h-0 flex-1 flex-col">
         {books.isPending && <p className="text-zinc-400">Loading…</p>}
         {books.isError && (
           <p className="text-red-400">Couldn't load books — {(books.error as Error).message}</p>
@@ -299,9 +302,12 @@ export function Reading() {
         )}
 
         {rows.length > 0 && (
-          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          // max-h-full (not flex-1) so a short list keeps a snug border while
+          // a long one caps at the leftover height and scrolls internally.
+          <div className="max-h-full overflow-x-auto overflow-y-auto rounded-xl border border-zinc-800">
             <table className="w-full text-sm">
-              <thead>
+              {/* Sticky within the card's scroll, solid bg so rows pass under. */}
+              <thead className="sticky top-0 z-10 bg-zinc-900">
                 <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
                   <th className="px-4 py-3 font-medium">Book</th>
                   <th className="px-4 py-3 font-medium">Status</th>
@@ -372,6 +378,6 @@ export function Reading() {
           </div>
         )}
       </section>
-    </>
+    </div>
   );
 }

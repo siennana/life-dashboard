@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { CalendarEvent, ExerciseRow } from "@life/shared";
 import { getCalendarEvents, getExercises } from "../api";
 import { dateKey, eventHoverTitle } from "../lib/calendar";
+import { durationLabel } from "../lib/duration";
 
 // The one scrollable 24-hour timeline used by BOTH the expanded-day schedule
 // (one column) and the expanded-week scan (seven columns). Because they share
@@ -40,7 +41,7 @@ const exBase = (e: ExerciseRow) => e.description?.trim() || e.type;
 // lead with whatever partial info it has.
 function exTopLabel(e: ExerciseRow) {
   if (e.time) return `${timeLabel(e.time)} ${exBase(e)}`;
-  if (e.totalTime != null) return `${e.totalTime}min ${e.type}`;
+  if (e.totalTime != null) return `${durationLabel(e.totalTime)} ${e.type}`;
   return exBase(e);
 }
 

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { CalendarEvent, ExerciseRow } from "@life/shared";
 import { getCalendarEvents, getExercises } from "../api";
+import { durationLabel } from "./duration";
 import { TagMarks } from "./tags";
 
 // Shared calendar building blocks used by BOTH the full Calendar page and the
@@ -12,9 +13,9 @@ export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export const dateKey = (y: number, m: number, d: number) =>
   `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
-// "30min gym" when a duration was logged, otherwise just "gym".
+// "30m gym" / "32m 45s run" when a duration was logged, otherwise just "gym".
 export const chipLabel = (e: ExerciseRow) =>
-  e.totalTime != null ? `${e.totalTime}min ${e.type}` : e.type;
+  e.totalTime != null ? `${durationLabel(e.totalTime)} ${e.type}` : e.type;
 
 // "9:30 AM Dentist" for timed events, just the title for all-day ones.
 export const eventLabel = (e: CalendarEvent) =>

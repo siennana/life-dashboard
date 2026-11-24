@@ -173,7 +173,7 @@ export type UploadResponse = z.infer<typeof uploadResponseSchema>;
 
 // Exercise — manually logged workouts. `type` and `date` are required; the rest
 // are optional. `date` is a plain YYYY-MM-DD (the day of the workout).
-export const EXERCISE_TYPES = ["run", "gym", "yoga", "bike", "hike", "custom"] as const;
+export const EXERCISE_TYPES = ["run", "gym", "yoga", "aerial", "bike", "hike", "custom"] as const;
 export const exerciseTypeSchema = z.enum(EXERCISE_TYPES);
 export type ExerciseType = z.infer<typeof exerciseTypeSchema>;
 
@@ -182,7 +182,7 @@ export const exerciseInputSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected date as YYYY-MM-DD"),
   time: z.string().regex(/^\d{2}:\d{2}$/, "expected time as HH:MM").optional(),
   description: z.string().trim().max(2000).optional(),
-  totalTime: z.number().nonnegative().optional(), // minutes
+  totalTime: z.number().nonnegative().optional(), // minutes; fraction carries seconds
   distanceMiles: z.number().nonnegative().optional(),
   caloriesBurned: z.number().nonnegative().optional(),
 });

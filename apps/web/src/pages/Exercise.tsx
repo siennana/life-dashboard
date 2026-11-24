@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   EXERCISE_TYPES,
   type ExerciseInput,
@@ -9,6 +9,7 @@ import {
 import { addExercise, deleteExercise, getExercises, updateExercise } from "../api";
 import { Stat } from "../components/Stat";
 import { SlideDown } from "../components/SlideDown";
+import { durationLabel } from "../lib/duration";
 import { useInlineEdit } from "../lib/useInlineEdit";
 
 // Local calendar date as YYYY-MM-DD (so "today" matches the user's clock, not UTC).
@@ -36,6 +37,117 @@ const prettyTime = (t: string) => {
 const fieldClass =
   "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none";
 
+// Segmented hh:mm:ss duration field — the format is structural (like the
+// native time input next to it), so nothing invalid can be typed: digit-only
+// segments, mm/ss clamped to 59, focus auto-advances after two digits.
+// All-empty = no duration. Emits MINUTES (seconds in the fraction) to match
+// how exercise durations are stored.
+function DurationInput({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (mins: number | null) => void;
+}) {
+  const [h, setH] = useState("");
+  const [m, setM] = useState("");
+  const [s, setS] = useState("");
+  const mRef = useRef<HTMLInputElement>(null);
+  const sRef = useRef<HTMLInputElement>(null);
+
+  // Adopt external value changes (edit prefill, clear-on-save) without
+  // fighting in-progress typing: skip when the prop is what we last emitted.
+  const lastEmitted = useRef<number | null>(null);
+  useEffect(() => {
+    if (value === lastEmitted.current) return;
+    lastEmitted.current = value;
+    if (value == null) {
+      setH("");
+      setM("");
+      setS("");
+      return;
+    }
+    const total = Math.round(value * 60);
+    const hh = Math.floor(total / 3600);
+    setH(hh > 0 ? String(hh) : "");
+    setM(String(Math.floor((total % 3600) / 60)).padStart(2, "0"));
+    setS(String(total % 60).padStart(2, "0"));
+  }, [value]);
+
+  function emit(hs: string, ms: string, ss: string) {
+    const next =
+      hs === "" && ms === "" && ss === ""
+        ? null
+        : Number(hs || 0) * 60 + Number(ms || 0) + Number(ss || 0) / 60;
+    lastEmitted.current = next;
+    onChange(next);
+  }
+
+  const handle =
+    (which: "h" | "m" | "s") => (e: React.ChangeEvent<HTMLInputElement>) => {
+      let v = e.target.value.replace(/\D/g, "").slice(0, 2);
+      if (which !== "h" && v !== "" && Number(v) > 59) v = "59";
+      const [nh, nm, ns] =
+        which === "h" ? [v, m, s] : which === "m" ? [h, v, s] : [h, m, v];
+      setH(nh);
+      setM(nm);
+      setS(ns);
+      emit(nh, nm, ns);
+      if (v.length === 2) {
+        const next = which === "h" ? mRef.current : which === "m" ? sRef.current : null;
+        next?.focus();
+        next?.select();
+      }
+    };
+
+  // Pad to two digits on blur so a lone "5" settles as "05", like the native
+  // control (display only — the emitted minutes don't change). Functional
+  // update, because auto-advance blurs the segment in the same tick as its
+  // last change and a captured value would stomp it.
+  const pad = (set: React.Dispatch<React.SetStateAction<string>>) => () =>
+    set((v) => (v.length === 1 ? `0${v}` : v));
+
+  const segClass =
+    "w-7 bg-transparent text-center tabular-nums text-zinc-100 placeholder:text-zinc-500 focus:outline-none";
+  return (
+    <div className="mt-1 flex items-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm focus-within:border-zinc-500">
+      <input
+        type="text"
+        inputMode="numeric"
+        value={h}
+        onChange={handle("h")}
+        placeholder="hh"
+        aria-label="Hours"
+        className={segClass}
+      />
+      <span className="text-zinc-500">:</span>
+      <input
+        ref={mRef}
+        type="text"
+        inputMode="numeric"
+        value={m}
+        onChange={handle("m")}
+        onBlur={pad(setM)}
+        placeholder="mm"
+        aria-label="Minutes"
+        className={segClass}
+      />
+      <span className="text-zinc-500">:</span>
+      <input
+        ref={sRef}
+        type="text"
+        inputMode="numeric"
+        value={s}
+        onChange={handle("s")}
+        onBlur={pad(setS)}
+        placeholder="ss"
+        aria-label="Seconds"
+        className={segClass}
+      />
+    </div>
+  );
+}
+
 function LogForm({
   editing,
   onDone,
@@ -50,7 +162,7 @@ function LogForm({
   const [date, setDate] = useState(today());
   const [time, setTime] = useState("");
   const [description, setDescription] = useState("");
-  const [totalTime, setTotalTime] = useState("");
+  const [elapsed, setElapsed] = useState<number | null>(null); // minutes
   const [distance, setDistance] = useState("");
   const [calories, setCalories] = useState("");
 
@@ -59,7 +171,7 @@ function LogForm({
     setDate(today());
     setTime("");
     setDescription("");
-    setTotalTime("");
+    setElapsed(null);
     setDistance("");
     setCalories("");
   }
@@ -71,7 +183,7 @@ function LogForm({
     setDate(editing.date);
     setTime(editing.time ?? "");
     setDescription(editing.description ?? "");
-    setTotalTime(editing.totalTime != null ? String(editing.totalTime) : "");
+    setElapsed(editing.totalTime ?? null);
     setDistance(editing.distanceMiles != null ? String(editing.distanceMiles) : "");
     setCalories(editing.caloriesBurned != null ? String(editing.caloriesBurned) : "");
   }, [editing]);
@@ -102,7 +214,7 @@ function LogForm({
       date,
       ...(time !== "" ? { time } : {}),
       ...(description.trim() ? { description: description.trim() } : {}),
-      ...(totalTime !== "" ? { totalTime: Number(totalTime) } : {}),
+      ...(elapsed != null ? { totalTime: elapsed } : {}),
       ...(distance !== "" ? { distanceMiles: Number(distance) } : {}),
       ...(calories !== "" ? { caloriesBurned: Number(calories) } : {}),
     };
@@ -144,7 +256,7 @@ function LogForm({
             />
           </label>
           <label className="block">
-            <span className="text-xs text-zinc-500">Time</span>
+            <span className="text-xs text-zinc-500">Time of day</span>
             <input
               type="time"
               value={time}
@@ -164,16 +276,8 @@ function LogForm({
           />
         </label>
         <label className="block">
-          <span className="text-xs text-zinc-500">Total time (min)</span>
-          <input
-            type="number"
-            min="0"
-            step="any"
-            value={totalTime}
-            onChange={(e) => setTotalTime(e.target.value)}
-            placeholder="30"
-            className={`${fieldClass} mt-1`}
-          />
+          <span className="text-xs text-zinc-500">Time elapsed</span>
+          <DurationInput value={elapsed} onChange={setElapsed} />
         </label>
         <label className="block">
           <span className="text-xs text-zinc-500">Distance (mi)</span>
@@ -292,10 +396,17 @@ function ExerciseStats({ rows }: { rows: ExerciseRow[] }) {
         : rows.filter((r) =>
             r.date.startsWith(period === "month" ? localToday.slice(0, 7) : localToday.slice(0, 4)),
           );
+    // Distinct days per type, most days first (ties keep the enum's order —
+    // sort is stable); types with no entries in the period are omitted.
+    const daysByType = EXERCISE_TYPES.map((t) => ({
+      type: t,
+      days: new Set(inPeriod.filter((r) => r.type === t).map((r) => r.date)).size,
+    }))
+      .filter((x) => x.days > 0)
+      .sort((a, b) => b.days - a.days);
     return {
-      daysLogged: new Set(inPeriod.map((r) => r.date)).size,
+      daysByType,
       miles: inPeriod.reduce((sum, r) => sum + (r.distanceMiles ?? 0), 0),
-      totalMinutes: inPeriod.reduce((sum, r) => sum + (r.totalTime ?? 0), 0),
     };
   }, [rows, period, localToday]);
 
@@ -316,10 +427,7 @@ function ExerciseStats({ rows }: { rows: ExerciseRow[] }) {
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">Statistics</h2>
-          <p className="mt-0.5 text-xs text-zinc-500">{periodLabel}</p>
-        </div>
+        <p className="text-xs text-zinc-500">{periodLabel}</p>
         <div className="flex gap-0.5 rounded-lg border border-zinc-700 bg-zinc-800 p-0.5">
           {PERIODS.map((p) => (
             <button
@@ -336,12 +444,26 @@ function ExerciseStats({ rows }: { rows: ExerciseRow[] }) {
         </div>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-3">
-        <Stat label="Days logged" value={String(stats.daysLogged)} />
+        {/* One tile for every type's day count (Stat's shell, grid inside). */}
+        <div className="col-span-2 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+          <div className="text-xs uppercase tracking-wide text-zinc-500">Days logged</div>
+          {stats.daysByType.length === 0 ? (
+            <div className="mt-1 text-lg font-semibold text-zinc-100">0</div>
+          ) : (
+            <div className="mt-1 grid grid-cols-2 gap-x-6 gap-y-0.5 sm:grid-cols-3">
+              {stats.daysByType.map((x) => (
+                <div key={x.type} className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-sm capitalize text-zinc-400">{x.type}</span>
+                  <span className="text-lg font-semibold tabular-nums text-zinc-100">{x.days}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <Stat
           label="Miles"
           value={stats.miles.toLocaleString(undefined, { maximumFractionDigits: 1 })}
         />
-        <Stat label="Minutes" value={String(stats.totalMinutes)} />
       </div>
     </section>
   );
@@ -354,7 +476,10 @@ export function Exercise() {
   const { editing, closing, open: openEdit, close: closeEdit } = useInlineEdit<ExerciseRow>();
 
   return (
-    <>
+    // Desktop pins the page to the viewport (main's py-10 = 5rem) so the
+    // stats/form stay put and the table scrolls inside its own card; mobile
+    // keeps the normal page scroll.
+    <div className="flex flex-col md:h-[calc(100dvh-5rem)]">
       <ExerciseStats rows={rows} />
 
       {formOpen ? (
@@ -363,13 +488,13 @@ export function Exercise() {
         <button
           type="button"
           onClick={() => setFormOpen(true)}
-          className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+          className="mt-3 self-start rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
         >
           + Add Entry
         </button>
       )}
 
-      <section className="mt-3">
+      <section className="mt-3 flex min-h-0 flex-1 flex-col">
         {exercises.isPending && <p className="text-zinc-400">Loading…</p>}
         {exercises.isError && (
           <p className="text-red-400">Couldn't load exercises — {(exercises.error as Error).message}</p>
@@ -379,9 +504,12 @@ export function Exercise() {
         )}
 
         {rows.length > 0 && (
-          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          // max-h-full (not flex-1) so a short list keeps a snug border while
+          // a long one caps at the leftover height and scrolls internally.
+          <div className="max-h-full overflow-x-auto overflow-y-auto rounded-xl border border-zinc-800">
             <table className="w-full text-sm">
-              <thead>
+              {/* Sticky within the card's scroll, solid bg so rows pass under. */}
+              <thead className="sticky top-0 z-10 bg-zinc-900">
                 <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
                   <th className="px-4 py-3 font-medium">Date</th>
                   <th className="px-4 py-3 font-medium">Type</th>
@@ -415,7 +543,7 @@ export function Exercise() {
                         </td>
                         <td className="px-4 py-3 text-zinc-300">{r.description ?? "—"}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
-                          {r.totalTime == null ? "—" : `${r.totalTime} min`}
+                          {r.totalTime == null ? "—" : durationLabel(r.totalTime)}
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
                           {r.distanceMiles == null ? "—" : `${r.distanceMiles} mi`}
@@ -452,6 +580,6 @@ export function Exercise() {
           </div>
         )}
       </section>
-    </>
+    </div>
   );
 }
