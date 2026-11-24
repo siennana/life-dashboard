@@ -20,17 +20,17 @@ function usePortfolios() {
     queryFn: () => getPortfolio(),
   });
   const nm = useQuery({ queryKey: ["portfolio", "nm"], queryFn: () => getPortfolio("nm") });
-  const factset = useQuery({
-    queryKey: ["portfolio", "factset"],
-    queryFn: () => getPortfolio("factset"),
+  const retirement = useQuery({
+    queryKey: ["portfolio", "retirement"],
+    queryFn: () => getPortfolio("retirement"),
   });
-  return [individual, nm, factset];
+  return [individual, nm, retirement];
 }
 
 const PORTFOLIO_ROWS = [
   { account: "individual", label: "Individual" },
   { account: "nm", label: "NM" },
-  { account: "factset", label: "FactSet 401k" },
+  { account: "retirement", label: "401k" },
 ] as const;
 
 // One compact table instead of three widget cards: rows = portfolios (linking
@@ -116,7 +116,7 @@ function PortfolioGrid() {
 }
 
 // Per-date sum of the accounts' value series. Dates where only some accounts
-// have a snapshot show those alone (NM's/FactSet's series start at link day,
+// have a snapshot show those alone (NM's/the 401k's series start at link day,
 // so the combined line steps up there — that's real data availability, not
 // carry-forward invention). capturedAt/backfilled don't merge cleanly, so
 // merged points carry neither and the tooltip shows just the date.

@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { PortfolioResponse } from "@life/shared";
+import type { PlaidHealth, PortfolioResponse } from "@life/shared";
 import { Stat } from "../components/Stat";
-import { CheckIcon } from "../components/icons";
+import { CheckIcon, WarningIcon } from "../components/icons";
 
 // Shared finance formatting, the totals tiles, and the portfolio-value line
 // chart — used by the Stocks page, the Finance landing page, and the Home
@@ -48,25 +48,61 @@ export function Totals({
   );
 }
 
-// Page-header Plaid state, shared by the Stocks tabs and the Bank page: a
-// green check once the account's item syncs automatically, else a button to
-// the right /plaid-link flow.
-export function PlaidLinkStatus({ linked, href }: { linked: boolean; href: string }) {
-  if (linked) {
+// Page-header Plaid state, shared by the Stocks tabs and the Bank page.
+// Three states: no item yet → "Link Plaid" button; item linked and its last
+// sync succeeded → green check; item linked but its last sync errored (e.g.
+// ITEM_LOGIN_REQUIRED after a password/MFA change at the institution) →
+// amber re-link warning pointing at the same link flow, raw error in the
+// tooltip. `health` is the item's latest sync_runs outcome — a configured
+// token alone is NOT proof the connection still works.
+export function PlaidLinkStatus({
+  linked,
+  href,
+  health,
+}: {
+  linked: boolean;
+  href: string;
+  health?: PlaidHealth | null;
+}) {
+  if (!linked) {
     return (
-      <span className="flex items-center gap-1 text-xs text-emerald-400">
-        <CheckIcon className="h-3.5 w-3.5" />
-        Plaid linked
-      </span>
+      <Link
+        to={href}
+        className="rounded-lg bg-zinc-800 px-3 py-1 text-xs font-medium text-zinc-100 hover:bg-zinc-700"
+      >
+        Link Plaid
+      </Link>
+    );
+  }
+  if (health?.status === "error") {
+    return (
+      <Link
+        to={href}
+        title={health.error ?? undefined}
+        className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 hover:underline"
+      >
+        <WarningIcon className="h-3.5 w-3.5" />
+        Plaid error — re-link
+      </Link>
     );
   }
   return (
-    <Link
-      to={href}
-      className="rounded-lg bg-zinc-800 px-3 py-1 text-xs font-medium text-zinc-100 hover:bg-zinc-700"
+    <span
+      title={
+        health?.lastSync
+          ? `Last synced ${new Date(health.lastSync).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            })}`
+          : undefined
+      }
+      className="flex items-center gap-1 text-xs text-emerald-400"
     >
-      Link Plaid
-    </Link>
+      <CheckIcon className="h-3.5 w-3.5" />
+      Plaid linked
+    </span>
   );
 }
 

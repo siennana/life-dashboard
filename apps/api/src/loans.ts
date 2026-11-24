@@ -12,8 +12,8 @@ import type {
 import { loadTxs, merchantKeyOf, type Tx } from "./spending";
 
 // Manual loans live in the generic `events` table: source "manual", type
-// "loan" (no servicer is linkable through Plaid - Sallie Mae is DOWN/delisted,
-// federal servicers broke in 2024). The entered balance is an anchor: the
+// "loan" (no relevant servicer is linkable through Plaid - private ones are
+// DOWN/delisted, federal ones broke in 2024). The entered balance is an anchor: the
 // remaining balance as of `asOfDate`. From there the API accrues daily simple
 // interest and applies matched bank transactions as payments, so the shown
 // balance keeps tracking without re-entering it - re-anchor (edit the balance

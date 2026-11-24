@@ -75,11 +75,11 @@ describe("normalizeMerchant / merchantKeyOf", () => {
   });
 
   it("passes unknown merchants through untouched", () => {
-    expect(normalizeMerchant("Sallie Mae")).toBe("Sallie Mae");
+    expect(normalizeMerchant("Acme Lending")).toBe("Acme Lending");
   });
 
   it("keys are lowercased + trimmed", () => {
-    expect(merchantKeyOf("  Sallie Mae ")).toBe("sallie mae");
+    expect(merchantKeyOf("  Acme Lending ")).toBe("acme lending");
     expect(merchantKeyOf("CHIDOORDASH.COMCA")).toBe("doordash");
   });
 });

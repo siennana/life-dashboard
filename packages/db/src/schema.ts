@@ -115,7 +115,7 @@ export const tagRules = pgTable(
 
 // Tag → calendar-event assignments, keyed on the event's iCloud externalId
 // (the VEVENT uid, or uid:occurrenceISO for one instance of a recurring
-// event). Per-occurrence on purpose — Sienna tags particular events (#trip,
+// event). Per-occurrence on purpose — tags mark particular events (#trip,
 // #celebration), not series. The externalId is the only handle that survives
 // the CalDAV sync's upsert/prune cycle (payload gets rewritten every 5 min),
 // which is why tags live here instead of on the event row. A row whose event

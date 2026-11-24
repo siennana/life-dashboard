@@ -31,7 +31,7 @@ export const NAV_ICONS: Record<string, (props: { className?: string }) => React.
   "/finance": WalletIcon,
   "/finance/stocks/individual": TrendingUpIcon,
   "/finance/stocks/nm": TrendingUpIcon,
-  "/finance/stocks/factset": TrendingUpIcon,
+  "/finance/stocks/retirement": TrendingUpIcon,
   "/finance/bank": BankIcon,
   "/finance/loans": PercentIcon,
   "/exercise": ExerciseIcon,

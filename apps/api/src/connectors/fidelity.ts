@@ -71,7 +71,7 @@ export function parseHoldings(csv: string): { holdings: Holding[]; skipped: numb
 
 // Ingest a positions CSV: parse → upsert holdings → drop positions no longer
 // present (sold). Records a sync_run like every other connector. `source`
-// picks which account's holdings this replaces (fidelity/nm/factset — the
+// picks which account's holdings this replaces (fidelity/nm/retirement — the
 // loose header matching handles most broker exports, not just Fidelity's).
 // On a Plaid-linked account a CSV is only a manual override: the next 5-min
 // investments sync replaces it.

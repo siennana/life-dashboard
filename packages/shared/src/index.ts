@@ -50,9 +50,9 @@ export type StatusResponse = z.infer<typeof statusResponseSchema>;
 
 // Which stock account a portfolio request/response is about: "individual" =
 // the Fidelity brokerage (CSV upload or Plaid), "nm" = Northwestern Mutual
-// via Plaid, "factset" = the FactSet 401k (same Fidelity Plaid item as
+// via Plaid, "retirement" = the 401k (same Fidelity Plaid item as
 // "individual", split out by account subtype).
-export const STOCK_ACCOUNTS = ["individual", "nm", "factset"] as const;
+export const STOCK_ACCOUNTS = ["individual", "nm", "retirement"] as const;
 export const stockAccountSchema = z.enum(STOCK_ACCOUNTS);
 export type StockAccount = z.infer<typeof stockAccountSchema>;
 
@@ -111,6 +111,17 @@ export const portfolioRiskSchema = z.object({
 });
 export type PortfolioRisk = z.infer<typeof portfolioRiskSchema>;
 
+// Live health of a linked Plaid item, from its connector's latest finished
+// sync_runs row. `linked` alone only proves an access token is configured —
+// the item can still be dead (ITEM_LOGIN_REQUIRED after a password/MFA
+// change at the institution). "unknown" = no run recorded yet.
+export const plaidHealthSchema = z.object({
+  status: z.enum(["ok", "error", "unknown"]),
+  error: z.string().nullable(),
+  lastSync: z.string().nullable(),
+});
+export type PlaidHealth = z.infer<typeof plaidHealthSchema>;
+
 export const portfolioResponseSchema = z.object({
   positions: z.array(positionSchema),
   totals: z.object({
@@ -147,6 +158,9 @@ export const portfolioResponseSchema = z.object({
   // PLAID_NM_ACCESS_TOKEN) — the UI shows the link CTA instead of the empty
   // dashboard. "individual" is CSV-based, so it's always true there.
   linked: z.boolean(),
+  // Health of the account's Plaid item (the badge's real check); null when
+  // there's no item to check (CSV-only individual, or not linked).
+  health: plaidHealthSchema.nullable(),
 });
 export type PortfolioResponse = z.infer<typeof portfolioResponseSchema>;
 
@@ -387,9 +401,9 @@ export const plaidLinkTokenInputSchema = z.object({
 });
 export type PlaidLinkMode = z.infer<typeof plaidLinkTokenInputSchema>["mode"];
 
-// Loans — manual entries (source "manual", type "loan"), since no servicer is
-// linkable through Plaid (Sallie Mae is DOWN/delisted, federal servicers broke
-// in 2024). `balance` is the remaining balance as of `asOfDate`; the API
+// Loans — manual entries (source "manual", type "loan"), since no relevant
+// servicer is linkable through Plaid (private ones DOWN/delisted, federal
+// ones broke in 2024). `balance` is the remaining balance as of `asOfDate`; the API
 // accrues daily simple interest from that anchor and applies linked bank
 // transactions as payments (interest first, then principal).
 export const loanInputSchema = z.object({
@@ -646,6 +660,8 @@ export type RecurringSeriesInput = z.infer<typeof recurringSeriesInputSchema>;
 export const spendingDashboardSchema = z.object({
   configured: z.boolean(),
   linked: z.boolean(),
+  // Health of the US Bank Plaid item (same semantics as the portfolio's).
+  health: plaidHealthSchema.nullable().optional(),
   month: z.string(), // selected YYYY-MM
   months: z.array(z.string()), // every month with data, newest first
   summary: z.object({

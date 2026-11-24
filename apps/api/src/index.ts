@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import Fastify from "fastify";
 import { ZodError } from "zod";
-import { createDb, events, metrics } from "@life/db";
+import { createDb, events, metrics, syncRuns, type Db } from "@life/db";
 import { config } from "./config";
 import { closeTodoistTask, syncTodoist } from "./connectors/todoist";
 import { importFidelityCsv } from "./connectors/fidelity";
@@ -65,6 +65,7 @@ import {
   tagToggleInputSchema,
   tagUpdateInputSchema,
   uiSettingsSchema,
+  type PlaidHealth,
   type SyncMode,
   type SyncProcess,
   type SyncProcessStatus,
@@ -189,11 +190,11 @@ function processDefs(): ProcessDef[] {
     { key: "finnhub", label: "Finnhub", type: "REST API", cadence: loop, configured: Boolean(config.finnhubApiKey) },
     { key: "yahoo", label: "Yahoo Finance", type: "REST API", cadence: loop, configured: Boolean(config.finnhubApiKey) },
     // Fidelity flips from manual CSV to an automated Plaid pull once its
-    // investments item is linked; that same item also feeds the FactSet 401k.
+    // investments item is linked; that same item also feeds the 401k.
     ...(plaidCreds() && config.plaidFidelityAccessToken
       ? [{ key: "fidelity", label: "Fidelity", type: "REST API", cadence: loop, configured: true }]
       : [{ key: "fidelity", label: "Fidelity", type: "CSV upload", cadence: "manual", configured: true }]),
-    { key: "factset", label: "FactSet 401k", type: "REST API", cadence: loop, configured: Boolean(plaidCreds() && config.plaidFidelityAccessToken) },
+    { key: "retirement", label: "401k", type: "REST API", cadence: loop, configured: Boolean(plaidCreds() && config.plaidFidelityAccessToken) },
   ];
 }
 
@@ -293,12 +294,12 @@ app.delete("/api/todos/:externalId", async (req, reply) => {
 });
 
 // Finance: upload a positions CSV (raw text body) → store holdings for the
-// given account (?account=individual|nm|factset, default individual). On a
+// given account (?account=individual|nm|retirement, default individual). On a
 // Plaid-linked account this is a manual override until the next sync.
 app.post("/api/finance/holdings/upload", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   const parsed = stockAccountSchema.safeParse((req.query as { account?: string }).account ?? "individual");
-  if (!parsed.success) return reply.code(400).send({ error: "invalid account - expected individual | nm | factset" });
+  if (!parsed.success) return reply.code(400).send({ error: "invalid account - expected individual | nm | retirement" });
   const source = parsed.data === "individual" ? "fidelity" : parsed.data;
   const csv = typeof req.body === "string" ? req.body : "";
   if (!csv.trim()) return reply.code(400).send({ error: "empty upload - expected CSV text" });
@@ -314,8 +315,9 @@ app.get("/api/finance/portfolio", async (req, reply) => {
   const parsed = stockAccountSchema.safeParse((req.query as { account?: string }).account ?? "individual");
   if (!parsed.success) return reply.code(400).send({ error: "invalid account - expected individual | nm" });
   const account = parsed.data;
-  // "linked" = this account's Plaid investments item exists ("factset" rides
-  // the individual item — one Fidelity login covers both). For "nm"/"factset"
+  // "linked" = this account's Plaid investments item exists ("retirement"
+  // rides the individual item — one Fidelity login covers both). For
+  // "nm"/"retirement"
   // it gates the whole dashboard (CTA instead); for "individual" it only
   // drives the Link Plaid button vs. green check — CSV holdings work either
   // way, so that dashboard always builds.
@@ -323,15 +325,20 @@ app.get("/api/finance/portfolio", async (req, reply) => {
     account === "nm"
       ? Boolean(plaidCreds() && config.plaidNmAccessToken)
       : Boolean(plaidCreds() && config.plaidFidelityAccessToken);
+  // The badge's real health check: the item's latest sync outcome. Only when
+  // a Plaid item exists — CSV-only "individual" has nothing to check.
+  const health = linked
+    ? await plaidItemHealth(db, account === "individual" ? "fidelity" : account)
+    : null;
   return buildPortfolio(db, config.finnhubApiKey, account, account === "individual" ? true : linked).then(
-    (p) => ({ ...p, linked }),
+    (p) => ({ ...p, linked, health }),
   );
 });
 
 // Loans: manual entries (source "manual", type "loan") with linked bank
 // transactions as payments; balances are computed server-side (daily simple
 // interest from the anchor, payments applied interest-first). Local calendar
-// day as "today" so accrual/due dates match what Sienna sees.
+// day as "today" so accrual/due dates match the user's calendar day.
 const localDay = () => {
   const now = new Date();
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
@@ -506,6 +513,26 @@ app.put("/api/settings/sync", async (req, reply) => {
   return saved;
 });
 
+// Health of a Plaid-backed pipeline for the page-header badge: the latest
+// *finished* sync_runs row for its source. "linked" only proves a token is
+// configured; this is what tells the UI the item actually still works
+// (ITEM_LOGIN_REQUIRED shows up here as an error run).
+async function plaidItemHealth(activeDb: Db, source: string): Promise<PlaidHealth> {
+  const rows = await activeDb
+    .select()
+    .from(syncRuns)
+    .where(and(eq(syncRuns.source, source), sql`${syncRuns.status} <> 'running'`))
+    .orderBy(desc(syncRuns.startedAt))
+    .limit(1);
+  const run = rows[0];
+  if (!run) return { status: "unknown", error: null, lastSync: null };
+  return {
+    status: run.status === "error" ? "error" : "ok",
+    error: run.error ?? null,
+    lastSync: run.finishedAt?.toISOString() ?? null,
+  };
+}
+
 // Plaid credentials from .env, or null until both keys are set.
 function plaidCreds(): PlaidCreds | null {
   if (!config.plaidClientId || !config.plaidSecret) return null;
@@ -537,11 +564,12 @@ app.post("/api/plaid/exchange", async (req, reply) => {
 app.get("/api/finance/spending", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   const { month } = req.query as { month?: string };
-  return buildSpendingDashboard(db, {
-    configured: plaidCreds() != null,
-    linked: Boolean(config.plaidUsBankAccessToken),
-    month,
-  });
+  const linked = Boolean(config.plaidUsBankAccessToken);
+  const [dashboard, health] = await Promise.all([
+    buildSpendingDashboard(db, { configured: plaidCreds() != null, linked, month }),
+    linked ? plaidItemHealth(db, "plaid") : Promise.resolve(null),
+  ]);
+  return { ...dashboard, health };
 });
 
 // Net cashflow per day (income − spend), for the per-day figure on the calendar.
@@ -785,7 +813,7 @@ app.delete("/api/books/:id", async (req, reply) => {
 });
 
 // The connectors that can be synced on demand, keyed by their sync_runs source.
-const SYNCABLE_SOURCES = ["todoist", "calendar", "plaid", "nm", "fidelity", "factset", "github", "wakatime"] as const;
+const SYNCABLE_SOURCES = ["todoist", "calendar", "plaid", "nm", "fidelity", "retirement", "github", "wakatime"] as const;
 type SyncableSource = (typeof SYNCABLE_SOURCES)[number];
 
 // Run one connector by its source key. Returns the connector's own result, or a
@@ -813,9 +841,9 @@ function runConnector(activeDb: NonNullable<typeof db>, source: SyncableSource):
         ? syncInvestmentHoldings(activeDb, creds, config.plaidNmAccessToken, "nm")
         : Promise.resolve({ skipped: "not configured" });
     }
-    // Both keys sync the whole Fidelity item (it feeds fidelity + factset).
+    // Both keys sync the whole Fidelity item (it feeds fidelity + retirement).
     case "fidelity":
-    case "factset": {
+    case "retirement": {
       const creds = plaidCreds();
       return creds && config.plaidFidelityAccessToken
         ? syncInvestmentHoldings(activeDb, creds, config.plaidFidelityAccessToken, "individual")
@@ -972,7 +1000,7 @@ async function runSyncs() {
         await syncPortfolioSnapshot(activeDb, config.finnhubApiKey, [
           "individual",
           ...(nmLinked ? (["nm"] as const) : []),
-          ...(individualLinked ? (["factset"] as const) : []),
+          ...(individualLinked ? (["retirement"] as const) : []),
         ]);
       } catch (err) {
         app.log.error({ err }, "market snapshot failed");

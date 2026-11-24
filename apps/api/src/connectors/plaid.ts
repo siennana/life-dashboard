@@ -214,10 +214,10 @@ function nmSymbol(s: PlaidSecurity | undefined): { symbol: string; quotable: boo
 }
 
 // One Plaid item can hold several real accounts (the Fidelity login covers
-// the individual brokerage AND the FactSet 401k), and each dashboard account
-// is its own source. `item` picks the routing: "nm" sends everything to
-// source "nm"; "individual" splits by account subtype — 401k accounts feed
-// source "factset", everything else "fidelity". Each source gets its own
+// the individual brokerage AND the 401k), and each dashboard account is its
+// own source. `item` picks the routing: "nm" sends everything to source
+// "nm"; "individual" splits by account subtype — 401k accounts feed source
+// "retirement", everything else "fidelity". Each source gets its own
 // sync_runs row per run (they share the fate of the one API call).
 export async function syncInvestmentHoldings(
   db: Db,
@@ -225,7 +225,7 @@ export async function syncInvestmentHoldings(
   accessToken: string,
   item: "nm" | "individual",
 ) {
-  const sources = item === "nm" ? ["nm"] : ["fidelity", "factset"];
+  const sources = item === "nm" ? ["nm"] : ["fidelity", "retirement"];
   const runs = await db
     .insert(syncRuns)
     .values(sources.map((source) => ({ source })))
@@ -242,7 +242,7 @@ export async function syncInvestmentHoldings(
       item === "nm"
         ? "nm"
         : subtypeByAccount.get(accountId) === "401k"
-          ? "factset"
+          ? "retirement"
           : "fidelity";
 
     // The same security can sit in several sub-accounts of one source — the
@@ -280,8 +280,8 @@ export async function syncInvestmentHoldings(
         description: s?.name ?? null,
         quantity,
         // Cash has no cost-basis semantics - Plaid's ledger figures there
-        // poison the portfolio totals (a -$2,988 cash "cost" once turned into
-        // a phantom +$2,988 total gain and a /~0 gain percentage).
+        // poison the portfolio totals (a negative cash "cost" reads as a
+        // phantom gain and a divide-by-~0 gain percentage).
         costBasis: isCash ? null : sumOf((h) => h.cost_basis),
         institutionPrice: rows[0]?.institution_price ?? s?.close_price ?? null,
         securityType: s?.type ?? null,
@@ -307,15 +307,21 @@ export async function syncInvestmentHoldings(
     // A security missing from this pull (or skipped as an artifact above) was
     // sold — remove it per source (same replace semantics as the CSV upload;
     // for "fidelity" the first Plaid prune also clears the old CSV rows).
+    // Zero holdings for a source still prunes IF its account(s) appeared in
+    // the response: a present-but-empty account really was emptied (sold out
+    // or rolled over), so stored rows must not freeze at their last value.
+    // Only an account absent from the response entirely skips the prune, as
+    // defense against a partial/odd API response.
+    const accountsPresent = new Set<string>(accounts.map((a) => sourceOf(a.account_id)));
     for (const [source, keep] of storedBySource) {
-      if (keep.length === 0) continue;
+      if (!accountsPresent.has(source)) continue;
       await db
         .delete(events)
         .where(
           and(
             eq(events.source, source),
             eq(events.type, "holding"),
-            notInArray(events.externalId, keep),
+            ...(keep.length > 0 ? [notInArray(events.externalId, keep)] : []),
           ),
         );
     }
@@ -338,7 +344,7 @@ export async function syncInvestmentHoldings(
 }
 
 // Read stored Plaid-shape holdings back out for pricing/display (finance.ts).
-// Works for any source the investments sync writes ("nm", "factset").
+// Works for any source the investments sync writes ("nm", "retirement").
 export async function getInvestmentHoldings(
   db: Db,
   source: string,

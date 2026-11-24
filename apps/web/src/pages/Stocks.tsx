@@ -441,7 +441,7 @@ function PositionsTable({ positions }: { positions: PortfolioResponse["positions
 const ACCOUNT_TABS: { key: StockAccount; label: string }[] = [
   { key: "individual", label: "Individual" },
   { key: "nm", label: "NM" },
-  { key: "factset", label: "FactSet 401k" },
+  { key: "retirement", label: "401k" },
 ];
 
 function AccountTabs({
@@ -478,33 +478,33 @@ function AccountTabs({
   );
 }
 
-// Where each account's Plaid link flow lives (FactSet rides the Fidelity
+// Where each account's Plaid link flow lives (the 401k rides the Fidelity
 // item, so its link runs the individual-account flow). Rendered by the shared
 // PlaidLinkStatus (lib/finance) next to Upload CSV on every tab.
 const PLAID_LINK_HREF: Record<StockAccount, string> = {
   individual: "/plaid-link?mode=investments&account=individual",
   nm: "/plaid-link?mode=investments",
-  factset: "/plaid-link?mode=investments&account=individual",
+  retirement: "/plaid-link?mode=investments&account=individual",
 };
 
-// An unlinked Plaid-fed tab: point at the one-time link flow. The FactSet
-// 401k rides the Fidelity item, so its CTA runs the individual-account link.
-const LINK_CTA: Record<"nm" | "factset", { title: string; env: string; href: string; label: string }> = {
+// An unlinked Plaid-fed tab: point at the one-time link flow. The 401k rides
+// the Fidelity item, so its CTA runs the individual-account link.
+const LINK_CTA: Record<"nm" | "retirement", { title: string; env: string; href: string; label: string }> = {
   nm: {
     title: "Northwestern Mutual",
     env: "PLAID_NM_ACCESS_TOKEN",
     href: "/plaid-link?mode=investments",
     label: "Link NM via Plaid",
   },
-  factset: {
-    title: "FactSet 401k",
+  retirement: {
+    title: "401k",
     env: "PLAID_FIDELITY_ACCESS_TOKEN",
     href: "/plaid-link?mode=investments&account=individual",
     label: "Link Fidelity via Plaid",
   },
 };
 
-function LinkCta({ account }: { account: "nm" | "factset" }) {
+function LinkCta({ account }: { account: "nm" | "retirement" }) {
   const cta = LINK_CTA[account];
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
@@ -512,7 +512,7 @@ function LinkCta({ account }: { account: "nm" | "factset" }) {
       <p className="mt-3 text-sm text-zinc-400">
         This account isn't linked yet. Connect it through Plaid to pull holdings into the same
         dashboard — a one-time setup.
-        {account === "factset" && " The 401k comes through the Fidelity login's Plaid item."}
+        {account === "retirement" && " The 401k comes through the Fidelity login's Plaid item."}
       </p>
       <Link
         to={cta.href}
@@ -569,7 +569,11 @@ export function Stocks() {
           <h1 className="text-2xl font-semibold">Stocks</h1>
           <UploadButton account={account} />
           {portfolio.data && (
-            <PlaidLinkStatus linked={portfolio.data.linked} href={PLAID_LINK_HREF[account]} />
+            <PlaidLinkStatus
+              linked={portfolio.data.linked}
+              health={portfolio.data.health}
+              href={PLAID_LINK_HREF[account]}
+            />
           )}
         </div>
         {(portfolio.data?.holdingsAsOf || portfolio.data?.pricedAt) && (

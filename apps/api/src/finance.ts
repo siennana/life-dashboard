@@ -170,7 +170,7 @@ const ACCOUNTS: Record<
 > = {
   individual: { source: "fidelity", loadHoldings: loadIndividualHoldings },
   nm: { source: "nm", loadHoldings: (db) => getInvestmentHoldings(db, "nm") },
-  factset: { source: "factset", loadHoldings: (db) => getInvestmentHoldings(db, "factset") },
+  retirement: { source: "retirement", loadHoldings: (db) => getInvestmentHoldings(db, "retirement") },
 };
 
 // Only real-looking tickers go to Finnhub/Yahoo — NM annuity sub-funds get a
@@ -300,6 +300,8 @@ export async function buildPortfolio(
     quotesConfigured,
     account,
     linked,
+    // Filled by the portfolio route (needs sync_runs); null in snapshot use.
+    health: null,
   };
 }
 

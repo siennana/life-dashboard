@@ -7,7 +7,7 @@ import type { SyncMode } from "@life/shared";
 
 // How recently the dashboard must have been used (any authenticated API
 // request) for "active" mode to keep syncing: two sync intervals, so one
-// last cycle lands after she navigates away.
+// last cycle lands after the user navigates away.
 export const ACTIVITY_WINDOW_MS = 10 * 60 * 1000;
 
 // "Active" mode still runs one cycle per day with no usage at all, so daily

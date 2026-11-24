@@ -1,5 +1,5 @@
-// One-time seed of the FactSet 401k's daily `portfolio_value` series (source
-// "factset") for the gap before live snapshots existed.
+// One-time seed of the 401k's daily `portfolio_value` series (source
+// "retirement") for the gap before live snapshots existed.
 //
 // The 401k fund has no ticker, so there is no Yahoo close to lean on. Instead
 // everything comes from Plaid's investment transactions (real custodian data):
@@ -81,9 +81,9 @@ async function main() {
   const held = await db
     .select()
     .from(events)
-    .where(and(eq(events.source, "factset"), eq(events.type, "holding")));
+    .where(and(eq(events.source, "retirement"), eq(events.type, "holding")));
   if (held.length === 0) {
-    console.error("No factset holdings stored - run the fidelity sync first.");
+    console.error("No retirement holdings stored - run the fidelity sync first.");
     process.exit(1);
   }
   const anchors = new Map(
@@ -218,7 +218,7 @@ async function main() {
     const res = await db
       .insert(metrics)
       .values({
-        source: "factset",
+        source: "retirement",
         name: "portfolio_value",
         value: r.value.toFixed(2),
         unit: "usd",

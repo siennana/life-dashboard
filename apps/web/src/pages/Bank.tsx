@@ -790,7 +790,7 @@ function CategoryBars({
 
 // ---------------------------------------------------------------------------
 
-// Recurring charges: fresh detections (Suggested) vs series Sienna has
+// Recurring charges: fresh detections (Suggested) vs series the user has
 // confirmed as truly recurring (Confirmed) — confirming stores a durable
 // merchant+amount+cadence pattern the API re-matches against history each
 // request. Totals cover active confirmed series only; "Annual" is
@@ -1467,7 +1467,7 @@ export function Bank() {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">Bank</h1>
           {/* only once the client keys exist — /plaid-link needs them */}
-          {d.configured && <PlaidLinkStatus linked={d.linked} href="/plaid-link" />}
+          {d.configured && <PlaidLinkStatus linked={d.linked} health={d.health} href="/plaid-link" />}
         </div>
         <p className="mt-3 text-sm text-zinc-400">
           {!d.configured
@@ -1492,7 +1492,7 @@ export function Bank() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">Bank</h1>
-          <PlaidLinkStatus linked={d.linked} href="/plaid-link" />
+          <PlaidLinkStatus linked={d.linked} health={d.health} href="/plaid-link" />
         </div>
         {/* month switcher - the filter row; scopes everything below */}
         <div className="flex items-center gap-1">

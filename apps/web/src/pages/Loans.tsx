@@ -122,7 +122,7 @@ function LoanForm({ editing, onDone }: { editing: LoanRow | null; onDone: () => 
             type="text"
             value={lender}
             onChange={(e) => setLender(e.target.value)}
-            placeholder="e.g. Sallie Mae"
+            placeholder="e.g. Lender Name"
             className={`${fieldClass} mt-1`}
           />
         </label>
