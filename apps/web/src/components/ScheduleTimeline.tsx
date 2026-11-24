@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { CalendarEvent, ExerciseRow } from "@life/shared";
 import { getCalendarEvents, getExercises } from "../api";
-import { dateKey } from "../lib/calendar";
+import { dateKey, eventHoverTitle } from "../lib/calendar";
 
 // The one scrollable 24-hour timeline used by BOTH the expanded-day schedule
 // (one column) and the expanded-week scan (seven columns). Because they share
@@ -29,9 +29,10 @@ function timeLabel(hhmm: string) {
   return `${h12}:${String(m ?? 0).padStart(2, "0")} ${(h ?? 0) < 12 ? "AM" : "PM"}`;
 }
 
-// Stable default so an omitted `hiddenCalendars` prop doesn't re-trigger the
-// filter useMemo every render.
+// Stable defaults so omitted filter props don't re-trigger the filter useMemo
+// every render.
 const EMPTY_HIDDEN: ReadonlySet<string> = new Set();
+const EMPTY_HIDDEN_TAGS: ReadonlySet<number> = new Set();
 
 const exBase = (e: ExerciseRow) => e.description?.trim() || e.type;
 
@@ -44,7 +45,8 @@ function exTopLabel(e: ExerciseRow) {
 }
 
 type Kind = "event" | "exercise";
-type Pinned = { key: string; kind: Kind; label: string; title?: string };
+// `event` rides along on calendar items so right-click can open the tag menu.
+type Pinned = { key: string; kind: Kind; label: string; title?: string; event?: CalendarEvent };
 type Block = {
   key: string;
   kind: Kind;
@@ -53,6 +55,7 @@ type Block = {
   timeText: string;
   label: string;
   title?: string;
+  event?: CalendarEvent;
 };
 type DayColumn = { pinned: Pinned[]; blocks: Block[] };
 
@@ -79,7 +82,7 @@ function buildSchedule(
     const day = map.get(dateKey(dt.getFullYear(), dt.getMonth(), dt.getDate()));
     if (!day) continue;
     if (e.allDay) {
-      day.pinned.push({ key: `cal-${e.id}`, kind: "event", label: e.title, title: e.location ?? undefined });
+      day.pinned.push({ key: `cal-${e.id}`, kind: "event", label: e.title, title: eventHoverTitle(e), event: e });
     } else {
       const start = new Date(e.start);
       const startMin = start.getHours() * 60 + start.getMinutes();
@@ -94,7 +97,8 @@ function buildSchedule(
         endMin,
         timeText: clockLabel(start),
         label: e.title,
-        title: e.location ?? undefined,
+        title: eventHoverTitle(e),
+        event: e,
       });
     }
   }
@@ -154,27 +158,34 @@ export function ScheduleTimeline({
   gutter,
   className = "",
   onDateContextMenu,
+  onEventContextMenu,
   showExercise = true,
   hiddenCalendars = EMPTY_HIDDEN,
+  hiddenEventTags = EMPTY_HIDDEN_TAGS,
 }: {
   dates: string[];
   gutter: number; // left gutter (px) reserved for the hour labels
   className?: string; // extra classes for the scroll container (sizing)
   onDateContextMenu?: (e: React.MouseEvent, date: string) => void;
+  // Right-click on a calendar block/pin — opens the event tag menu.
+  onEventContextMenu?: (e: React.MouseEvent, event: CalendarEvent) => void;
   showExercise?: boolean; // calendar filter: hide exercise blocks/pins
   hiddenCalendars?: ReadonlySet<string>; // calendar filter: excluded CalDAV calendar names
+  hiddenEventTags?: ReadonlySet<number>; // calendar filter: events carrying these tags are hidden
 }) {
   const events = useQuery({ queryKey: ["calendar-events"], queryFn: getCalendarEvents });
   const exercises = useQuery({ queryKey: ["exercises"], queryFn: getExercises });
   const datesKey = dates.join(",");
   const byDate = useMemo(() => {
     const visibleEvents = (events.data?.events ?? []).filter(
-      (e) => !hiddenCalendars.has(e.calendar ?? "Other"),
+      (e) =>
+        !hiddenCalendars.has(e.calendar ?? "Other") &&
+        !e.tags.some((t) => hiddenEventTags.has(t.id)),
     );
     const visibleExercises = showExercise ? (exercises.data?.exercises ?? []) : [];
     return buildSchedule(dates, visibleEvents, visibleExercises);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events.data, exercises.data, datesKey, showExercise, hiddenCalendars]);
+  }, [events.data, exercises.data, datesKey, showExercise, hiddenCalendars, hiddenEventTags]);
 
   // Denser type in the multi-column (week) layout, where columns are narrow.
   const dense = dates.length > 1;
@@ -217,6 +228,11 @@ export function ScheduleTimeline({
                 <div
                   key={it.key}
                   title={it.title}
+                  onContextMenu={
+                    it.event && onEventContextMenu
+                      ? (ev) => onEventContextMenu(ev, it.event!)
+                      : undefined
+                  }
                   className={`truncate rounded ring-1 ring-inset ${pinnedText} ${PINNED_CLASS[it.kind]}`}
                 >
                   {it.label}
@@ -253,6 +269,11 @@ export function ScheduleTimeline({
                 <div
                   key={b.key}
                   title={b.title}
+                  onContextMenu={
+                    b.event && onEventContextMenu
+                      ? (ev) => onEventContextMenu(ev, b.event!)
+                      : undefined
+                  }
                   style={laidOut[i]}
                   className={`absolute inset-x-0.5 overflow-hidden rounded px-1 leading-tight ring-1 ring-inset ${blockText} ${BLOCK_CLASS[b.kind]}`}
                 >

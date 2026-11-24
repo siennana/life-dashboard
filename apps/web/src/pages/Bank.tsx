@@ -19,14 +19,13 @@ import {
   CheckIcon,
   ChevronRightIcon,
   FunnelIcon,
-  HashtagIcon,
   PlusIcon,
   WarningIcon,
   XIcon,
 } from "../components/icons";
 import { quietBtnClass } from "../lib/controls";
 import { money, PlaidLinkStatus } from "../lib/finance";
-import { TAG_DOT_CLASSES, TAG_HEX, TAG_TEXT_CLASSES, TagPill, useTags } from "../lib/tags";
+import { TAG_DOT_CLASSES, TAG_HEX, TagMarks, TagPill, useTags } from "../lib/tags";
 
 // Spending dashboard (Plaid). Chart color system: spend is one measure, so
 // every chart uses a single accent (slot-1 blue #3987e5, validated ≥3:1 on the
@@ -840,20 +839,6 @@ const REC_GRID =
   "grid grid-cols-[minmax(0,1fr)_3rem_5rem_4rem] gap-x-3 sm:grid-cols-[minmax(0,1fr)_3rem_5.5rem_5rem_4rem] md:grid-cols-[minmax(0,1fr)_3rem_5.5rem_7.5rem_5rem_4rem]";
 const REC_GRID_CONFIRMED =
   "grid grid-cols-[minmax(0,1fr)_3rem_5rem_4rem] gap-x-3 sm:grid-cols-[minmax(0,1fr)_3rem_5.5rem_6.5rem_5rem_4rem] md:grid-cols-[minmax(0,1fr)_3rem_5.5rem_7.5rem_6.5rem_5rem_4rem]";
-
-// Compact tag marks for grid tag columns: one hashtag glyph per tag in the
-// tag's color, full name in the tooltip.
-function TagMarks({ tags }: { tags: Tag[] }) {
-  return (
-    <span className="flex items-center gap-0.5 overflow-hidden">
-      {tags.map((t) => (
-        <span key={t.id} title={`#${t.name}`} className={`shrink-0 ${TAG_TEXT_CLASSES[t.color]}`}>
-          <HashtagIcon className="h-3 w-3" />
-        </span>
-      ))}
-    </span>
-  );
-}
 
 // The Tags block of a merchant context menu: checkbox per tag, checking
 // applies the tag to the merchant (rule — every past+future charge). Shared

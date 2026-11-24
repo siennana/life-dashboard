@@ -9,15 +9,17 @@ import {
   togglePeriodDay,
 } from "../api";
 import { useTags } from "../lib/tags";
-import type { CashflowDay } from "@life/shared";
+import type { CashflowDay, Tag } from "@life/shared";
 import { DayChips, dateKey, useDayData, WEEKDAYS } from "../lib/calendar";
 import {
   BloodDropIcon,
+  ChevronRightIcon,
   CodeIcon,
   ExerciseIcon,
   FunnelIcon,
   PencilIcon,
 } from "../components/icons";
+import { useEventTagMenu } from "../components/EventTagMenu";
 import { quietBtnClass } from "../lib/controls";
 import { weatherEmoji } from "../lib/weather";
 import { usePeriodDays } from "../lib/period";
@@ -208,6 +210,67 @@ function TriCheckbox({
   );
 }
 
+// A collapsible tag checklist for the filter dropdown: a tri-state "Tags"
+// parent row (mirroring the CalDAV row) with a rotating chevron at its right
+// edge; the per-tag checkboxes only render while expanded. Shared by the
+// Events section (hide tagged events) and the Cashflow section (exclude
+// tagged merchants from the day sums) — same UI, different semantics.
+function CollapsibleTagChecklist({
+  tags,
+  hidden,
+  open,
+  onToggleOpen,
+  onToggleAll,
+  onToggleTag,
+}: {
+  tags: Tag[];
+  hidden: Set<number>;
+  open: boolean;
+  onToggleOpen: () => void;
+  onToggleAll: () => void;
+  onToggleTag: (id: number) => void;
+}) {
+  if (tags.length === 0) return null;
+  return (
+    <>
+      <div className="flex items-center gap-0.5">
+        <div className="min-w-0 flex-1">
+          <TriCheckbox
+            label="Tags"
+            checked={hidden.size === 0}
+            indeterminate={hidden.size > 0 && hidden.size < tags.length}
+            onChange={onToggleAll}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={onToggleOpen}
+          aria-label={open ? "Collapse tags" : "Expand tags"}
+          aria-expanded={open}
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-zinc-500 hover:bg-zinc-700/50 hover:text-zinc-300"
+        >
+          <ChevronRightIcon
+            className={`h-3 w-3 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+          />
+        </button>
+      </div>
+      {open && (
+        <div className="ml-2 space-y-0.5 border-l border-zinc-700/60 pl-2">
+          {tags.map((tag) => (
+            <TriCheckbox
+              key={tag.id}
+              label={`#${tag.name}`}
+              small
+              checked={!hidden.has(tag.id)}
+              onChange={() => onToggleTag(tag.id)}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 // One unified border around the whole drag range: every selected cell draws
 // the top/bottom edges and the two ends add their outer edge — inset shadows,
 // so the cells' real borders and layout don't shift while dragging.
@@ -300,6 +363,10 @@ type StoredCalendarFilters = {
   includeRecurring: boolean;
   hiddenCalendars: string[];
   excludedTags: number[];
+  hiddenEventTags: number[];
+  // Whether the two collapsible tag checklists are expanded.
+  eventTagsOpen: boolean;
+  cashflowTagsOpen: boolean;
 };
 
 function readStoredFilters(): Partial<StoredCalendarFilters> {
@@ -407,17 +474,27 @@ export function CalendarPage() {
   const [excludedTags, setExcludedTags] = useState<Set<number>>(
     new Set(stored.excludedTags ?? []),
   );
+  // Events section: events carrying any of these tags are hidden from chips,
+  // dots, and the schedule (client-side — events already carry their tags).
+  const [hiddenEventTags, setHiddenEventTags] = useState<Set<number>>(
+    new Set(stored.hiddenEventTags ?? []),
+  );
+  // The two tag checklists collapse (chevron) so a long tag list doesn't
+  // swallow the dropdown; open state persists with the rest of the filters.
+  const [eventTagsOpen, setEventTagsOpen] = useState(stored.eventTagsOpen ?? false);
+  const [cashflowTagsOpen, setCashflowTagsOpen] = useState(stored.cashflowTagsOpen ?? false);
   const tagsQuery = useTags();
   const tagList = tagsQuery.data?.tags ?? [];
 
-  function toggleExcludedTag(id: number) {
-    setExcludedTags((prev) => {
+  const toggleInSet = (set: (fn: (prev: Set<number>) => Set<number>) => void, id: number) =>
+    set((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }
+  const toggleExcludedTag = (id: number) => toggleInSet(setExcludedTags, id);
+  const toggleHiddenEventTag = (id: number) => toggleInSet(setHiddenEventTags, id);
 
   // Keyed on the exclusion set (sorted for key stability); previous data
   // holds the chips steady while the filtered response loads.
@@ -453,6 +530,9 @@ export function CalendarPage() {
         includeRecurring,
         hiddenCalendars: [...hiddenCalendars],
         excludedTags: [...excludedTags],
+        hiddenEventTags: [...hiddenEventTags],
+        eventTagsOpen,
+        cashflowTagsOpen,
       } satisfies StoredCalendarFilters),
     );
   }, [
@@ -466,6 +546,9 @@ export function CalendarPage() {
     includeRecurring,
     hiddenCalendars,
     excludedTags,
+    hiddenEventTags,
+    eventTagsOpen,
+    cashflowTagsOpen,
   ]);
 
   // Commit days for the datalet mark — shares the ["github-commits"] query
@@ -525,6 +608,7 @@ export function CalendarPage() {
     !showWeather ||
     includeRecurring ||
     excludedTags.size > 0 ||
+    hiddenEventTags.size > 0 ||
     hiddenCalendars.size > 0;
 
   useEffect(() => {
@@ -536,6 +620,10 @@ export function CalendarPage() {
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
   }, [filterOpen]);
+
+  // Right-click menu on a calendar event (chips + schedule blocks): the Tags
+  // checklist. Event right-clicks stopPropagation so the day menu stays out.
+  const { openEventMenu, eventTagMenu, eventMenuOpen } = useEventTagMenu();
 
   // Right-click context menu for toggling a day as menstruating.
   const [menu, setMenu] = useState<{ x: number; y: number; date: string } | null>(null);
@@ -561,13 +649,13 @@ export function CalendarPage() {
   useEffect(() => {
     if (isMobile || expandedWeek === null) return;
     const onDown = (e: PointerEvent) => {
-      if (menu) return;
+      if (menu || eventMenuOpen) return;
       if (gridRef.current?.contains(e.target as Node)) return;
       collapseAll();
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
-  }, [isMobile, expandedWeek, menu]);
+  }, [isMobile, expandedWeek, menu, eventMenuOpen]);
 
   function openContextMenu(e: React.MouseEvent, date: string) {
     e.preventDefault();
@@ -760,9 +848,14 @@ export function CalendarPage() {
   };
 
   // Events (CalDAV + exercise) visible for one day, gated by the filter
-  // dropdown's Events section — feeds DayChips and the month-cell dots.
+  // dropdown's Events section (calendar + tag checklists) — feeds DayChips
+  // and the month-cell dots.
   const visibleEventsFor = (key: string) =>
-    (eventsByDay.get(key) ?? []).filter((e) => !hiddenCalendars.has(e.calendar ?? "Other"));
+    (eventsByDay.get(key) ?? []).filter(
+      (e) =>
+        !hiddenCalendars.has(e.calendar ?? "Other") &&
+        !e.tags.some((t) => hiddenEventTags.has(t.id)),
+    );
   const visibleExercisesFor = (key: string) => (showExercise ? (byDay.get(key) ?? []) : []);
   // Marker presence is independent of the Events "Exercise" toggle — it reads
   // the raw data, gated only by its own `showExerciseMark`.
@@ -967,6 +1060,8 @@ export function CalendarPage() {
                 gutter={SCAN_GUTTER}
                 showExercise={showExercise}
                 hiddenCalendars={hiddenCalendars}
+                hiddenEventTags={hiddenEventTags}
+                onEventContextMenu={openEventMenu}
               />
             </div>
           )}
@@ -990,7 +1085,13 @@ export function CalendarPage() {
                   {dayBadges(expandedDay, true)}
                 </span>
               </div>
-              <DayForm date={expandedDay} showExercise={showExercise} hiddenCalendars={hiddenCalendars} />
+              <DayForm
+                date={expandedDay}
+                showExercise={showExercise}
+                hiddenCalendars={hiddenCalendars}
+                hiddenEventTags={hiddenEventTags}
+                onEventContextMenu={openEventMenu}
+              />
             </div>
           )}
         </div>
@@ -1098,6 +1199,20 @@ export function CalendarPage() {
                     ))}
                   </div>
                 )}
+                {/* Unchecking a tag hides events carrying it (chips, dots,
+                    schedule blocks). */}
+                <CollapsibleTagChecklist
+                  tags={tagList}
+                  hidden={hiddenEventTags}
+                  open={eventTagsOpen}
+                  onToggleOpen={() => setEventTagsOpen((v) => !v)}
+                  onToggleAll={() =>
+                    setHiddenEventTags(
+                      hiddenEventTags.size === 0 ? new Set(tagList.map((t) => t.id)) : new Set(),
+                    )
+                  }
+                  onToggleTag={toggleHiddenEventTag}
+                />
               </div>
               <div className="mt-2 px-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
                 Datalet
@@ -1153,33 +1268,18 @@ export function CalendarPage() {
                 />
                 {/* Unchecking a tag drops its merchants' transactions from the
                     day sums. Tri-state parent mirrors the CalDAV row. */}
-                {tagList.length > 0 && (
-                  <>
-                    <TriCheckbox
-                      label="Tags"
-                      checked={excludedTags.size === 0}
-                      indeterminate={excludedTags.size > 0 && excludedTags.size < tagList.length}
-                      onChange={() =>
-                        setExcludedTags(
-                          excludedTags.size === 0
-                            ? new Set(tagList.map((t) => t.id))
-                            : new Set(),
-                        )
-                      }
-                    />
-                    <div className="ml-2 space-y-0.5 border-l border-zinc-700/60 pl-2">
-                      {tagList.map((tag) => (
-                        <TriCheckbox
-                          key={tag.id}
-                          label={`#${tag.name}`}
-                          small
-                          checked={!excludedTags.has(tag.id)}
-                          onChange={() => toggleExcludedTag(tag.id)}
-                        />
-                      ))}
-                    </div>
-                  </>
-                )}
+                <CollapsibleTagChecklist
+                  tags={tagList}
+                  hidden={excludedTags}
+                  open={cashflowTagsOpen}
+                  onToggleOpen={() => setCashflowTagsOpen((v) => !v)}
+                  onToggleAll={() =>
+                    setExcludedTags(
+                      excludedTags.size === 0 ? new Set(tagList.map((t) => t.id)) : new Set(),
+                    )
+                  }
+                  onToggleTag={toggleExcludedTag}
+                />
               </div>
             </div>
           )}
@@ -1317,8 +1417,10 @@ export function CalendarPage() {
                               dates={selection}
                               gutter={SCAN_GUTTER}
                               onDateContextMenu={openContextMenu}
+                              onEventContextMenu={openEventMenu}
                               showExercise={showExercise}
                               hiddenCalendars={hiddenCalendars}
+                              hiddenEventTags={hiddenEventTags}
                             />
                           </div>
                           <div className="flex min-h-0 grow-[2] basis-0">
@@ -1408,7 +1510,13 @@ export function CalendarPage() {
                               {dayBadges(key)}
                             </span>
                           </div>
-                          <DayForm date={key} showExercise={showExercise} hiddenCalendars={hiddenCalendars} />
+                          <DayForm
+                            date={key}
+                            showExercise={showExercise}
+                            hiddenCalendars={hiddenCalendars}
+                            hiddenEventTags={hiddenEventTags}
+                            onEventContextMenu={openEventMenu}
+                          />
                         </div>
                       );
                     }
@@ -1461,7 +1569,11 @@ export function CalendarPage() {
                           </span>
                           {rightBadges}
                         </div>
-                        <DayChips dayEvents={dayEvents} entries={entries} />
+                        <DayChips
+                          dayEvents={dayEvents}
+                          entries={entries}
+                          onEventContextMenu={openEventMenu}
+                        />
                         {!isCompressed && !isDaySqueezed && logSnippets[key] && (
                           <LogPreview text={logSnippets[key]} />
                         )}
@@ -1509,6 +1621,7 @@ export function CalendarPage() {
           </div>
         </>
       )}
+      {eventTagMenu}
     </>
   );
 }

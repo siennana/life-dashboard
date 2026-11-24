@@ -37,7 +37,15 @@ import {
 import { syncGithub } from "./connectors/github";
 import { syncWakatime } from "./connectors/wakatime";
 import { getUiSettings, saveUiSettings } from "./settings";
-import { createTag, deleteTag, listTags, toggleTagMerchant, updateTag } from "./tags";
+import {
+  createTag,
+  deleteTag,
+  eventTagsByExternalId,
+  listTags,
+  toggleTagEvent,
+  toggleTagMerchant,
+  updateTag,
+} from "./tags";
 import {
   bookInputSchema,
   exerciseInputSchema,
@@ -50,6 +58,7 @@ import {
   recurringSeriesInputSchema,
   saveDayLogInputSchema,
   stockAccountSchema,
+  eventTagToggleInputSchema,
   tagCreateInputSchema,
   tagToggleInputSchema,
   tagUpdateInputSchema,
@@ -553,6 +562,18 @@ app.post("/api/tags/:id/toggle", async (req, reply) => {
   return result;
 });
 
+// Flip a tag on/off for one calendar event (the event context menu's
+// checkboxes) - keyed on the event's CalDAV externalId.
+app.post("/api/tags/:id/toggle-event", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const id = Number((req.params as { id: string }).id);
+  if (!Number.isInteger(id)) return reply.code(400).send({ error: "invalid tag id" });
+  const input = eventTagToggleInputSchema.parse(req.body);
+  const result = await toggleTagEvent(db, id, input.externalId);
+  if (!result) return reply.code(404).send({ error: "tag not found" });
+  return result;
+});
+
 // All plaid transactions on one day, for the calendar day-detail list.
 app.get("/api/finance/transactions/:date", async (req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
@@ -562,24 +583,30 @@ app.get("/api/finance/transactions/:date", async (req, reply) => {
 });
 
 // Calendar: events synced read-only from iCloud, ordered by start time.
+// Each event carries its user tags (event_tags keyed on externalId).
 app.get("/api/calendar/events", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
-  const rows = await db
-    .select()
-    .from(events)
-    .where(and(eq(events.source, "calendar"), eq(events.type, "calendar-event")))
-    .orderBy(asc(events.startTs));
+  const [rows, tagsByEvent] = await Promise.all([
+    db
+      .select()
+      .from(events)
+      .where(and(eq(events.source, "calendar"), eq(events.type, "calendar-event")))
+      .orderBy(asc(events.startTs)),
+    eventTagsByExternalId(db),
+  ]);
   return {
     events: rows.map((r) => {
       const p = (r.payload ?? {}) as { allDay?: boolean; calendar?: string; location?: string };
       return {
         id: r.id,
+        externalId: r.externalId,
         title: r.title ?? "(untitled)",
         start: r.startTs.toISOString(),
         end: r.endTs?.toISOString() ?? null,
         allDay: p.allDay ?? false,
         calendar: p.calendar ?? null,
         location: p.location ?? null,
+        tags: tagsByEvent.get(r.externalId) ?? [],
       };
     }),
   };

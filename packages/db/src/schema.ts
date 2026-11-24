@@ -113,6 +113,26 @@ export const tagRules = pgTable(
   (t) => [uniqueIndex("tag_rules_tag_merchant").on(t.tagId, t.merchantKey)],
 );
 
+// Tag → calendar-event assignments, keyed on the event's iCloud externalId
+// (the VEVENT uid, or uid:occurrenceISO for one instance of a recurring
+// event). Per-occurrence on purpose — Sienna tags particular events (#trip,
+// #celebration), not series. The externalId is the only handle that survives
+// the CalDAV sync's upsert/prune cycle (payload gets rewritten every 5 min),
+// which is why tags live here instead of on the event row. A row whose event
+// was deleted in iCloud just stops matching — harmless orphan, tiny table.
+export const eventTags = pgTable(
+  "event_tags",
+  {
+    id: serial("id").primaryKey(),
+    tagId: integer("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+    eventExternalId: text("event_external_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("event_tags_tag_event").on(t.tagId, t.eventExternalId)],
+);
+
 // One row per connector run — powers the sync-status widget.
 export const syncRuns = pgTable("sync_runs", {
   id: serial("id").primaryKey(),

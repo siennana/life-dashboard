@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Tag, TagColor } from "@life/shared";
 import { getTags } from "../api";
+import { HashtagIcon } from "../components/icons";
 
 // Tag color tokens → static Tailwind classes (dynamic class names can't be
 // generated at runtime — Tailwind only ships what it can see). text-*-300
@@ -52,6 +53,20 @@ export const TAG_DOT_CLASSES: Record<TagColor, string> = {
   violet: "bg-violet-400",
   pink: "bg-pink-400",
 };
+
+// Compact tag marks for tight rows (grid tag columns, calendar event chips):
+// one hashtag glyph per tag in the tag's color, full name in the tooltip.
+export function TagMarks({ tags }: { tags: Tag[] }) {
+  return (
+    <span className="flex items-center gap-0.5 overflow-hidden">
+      {tags.map((t) => (
+        <span key={t.id} title={`#${t.name}`} className={`shrink-0 ${TAG_TEXT_CLASSES[t.color]}`}>
+          <HashtagIcon className="h-3 w-3" />
+        </span>
+      ))}
+    </span>
+  );
+}
 
 export function TagPill({ tag }: { tag: Tag }) {
   return (

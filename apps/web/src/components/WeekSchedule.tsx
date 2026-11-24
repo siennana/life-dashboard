@@ -1,3 +1,4 @@
+import type { CalendarEvent } from "@life/shared";
 import { ScheduleTimeline } from "./ScheduleTimeline";
 
 // Expanded-week scan: a seven-column ScheduleTimeline sharing the whole
@@ -7,14 +8,18 @@ export function WeekSchedule({
   dates,
   gutter,
   onDateContextMenu,
+  onEventContextMenu,
   showExercise,
   hiddenCalendars,
+  hiddenEventTags,
 }: {
   dates: string[];
   gutter: number;
   onDateContextMenu?: (e: React.MouseEvent, date: string) => void;
+  onEventContextMenu?: (e: React.MouseEvent, event: CalendarEvent) => void;
   showExercise?: boolean;
   hiddenCalendars?: ReadonlySet<string>;
+  hiddenEventTags?: ReadonlySet<number>;
 }) {
   return (
     <ScheduleTimeline
@@ -22,8 +27,10 @@ export function WeekSchedule({
       gutter={gutter}
       className="min-h-0 flex-1"
       onDateContextMenu={onDateContextMenu}
+      onEventContextMenu={onEventContextMenu}
       showExercise={showExercise}
       hiddenCalendars={hiddenCalendars}
+      hiddenEventTags={hiddenEventTags}
     />
   );
 }

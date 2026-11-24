@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { CalendarEvent } from "@life/shared";
 import { closeTodo, getDayTransactions, getGithubCommits } from "../api";
 import { money } from "../lib/finance";
 import { CompleteButton, useTodosDueOn } from "../lib/todos";
@@ -144,10 +145,14 @@ export function DayForm({
   date,
   showExercise,
   hiddenCalendars,
+  hiddenEventTags,
+  onEventContextMenu,
 }: {
   date: string;
   showExercise?: boolean;
   hiddenCalendars?: ReadonlySet<string>;
+  hiddenEventTags?: ReadonlySet<number>;
+  onEventContextMenu?: (e: React.MouseEvent, event: CalendarEvent) => void;
 }) {
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 md:grid-cols-2">
@@ -158,7 +163,13 @@ export function DayForm({
         <CommitsForDay date={date} />
       </div>
       <div className="flex h-96 min-h-0 flex-col md:h-auto">
-        <DaySchedule date={date} showExercise={showExercise} hiddenCalendars={hiddenCalendars} />
+        <DaySchedule
+          date={date}
+          showExercise={showExercise}
+          hiddenCalendars={hiddenCalendars}
+          hiddenEventTags={hiddenEventTags}
+          onEventContextMenu={onEventContextMenu}
+        />
       </div>
     </div>
   );

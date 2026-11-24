@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { CalendarEvent, ExerciseRow } from "@life/shared";
 import { getCalendarEvents, getExercises } from "../api";
+import { TagMarks } from "./tags";
 
 // Shared calendar building blocks used by BOTH the full Calendar page and the
 // Home "this week" widget, so fetching, grouping, and chip rendering live once.
@@ -20,6 +21,12 @@ export const eventLabel = (e: CalendarEvent) =>
   e.allDay
     ? e.title
     : `${new Date(e.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${e.title}`;
+
+// Hover tooltip for an event chip/block: location plus any tags, so tagged
+// events are identifiable even where the hashtag marks don't fit.
+export const eventHoverTitle = (e: CalendarEvent) =>
+  [e.location, e.tags.map((t) => `#${t.name}`).join(" ")].filter(Boolean).join("\n") ||
+  undefined;
 
 // Calendar events on one local day, split into all-day and timed (timed sorted
 // by start). Shares the ["calendar-events"] query — no extra fetch.
@@ -71,12 +78,16 @@ export function useDayData() {
 }
 
 // The chips for a single day: violet iCloud events first, then blue exercises.
+// `onEventContextMenu` (Calendar page only) opens the event tag menu on
+// right-click; event chips show a hashtag mark per applied tag.
 export function DayChips({
   dayEvents,
   entries,
+  onEventContextMenu,
 }: {
   dayEvents: CalendarEvent[];
   entries: ExerciseRow[];
+  onEventContextMenu?: (e: React.MouseEvent, event: CalendarEvent) => void;
 }) {
   if (dayEvents.length === 0 && entries.length === 0) return null;
   return (
@@ -84,10 +95,12 @@ export function DayChips({
       {dayEvents.map((e) => (
         <div
           key={`cal-${e.id}`}
-          title={e.location ?? undefined}
-          className="truncate rounded bg-violet-500/15 px-1.5 py-0.5 text-xs text-violet-300 ring-1 ring-inset ring-violet-500/30"
+          title={eventHoverTitle(e)}
+          onContextMenu={onEventContextMenu ? (ev) => onEventContextMenu(ev, e) : undefined}
+          className="flex items-center gap-1 rounded bg-violet-500/15 px-1.5 py-0.5 text-xs text-violet-300 ring-1 ring-inset ring-violet-500/30"
         >
-          {eventLabel(e)}
+          <span className="min-w-0 flex-1 truncate">{eventLabel(e)}</span>
+          {e.tags.length > 0 && <TagMarks tags={e.tags} />}
         </div>
       ))}
       {entries.map((e) => (

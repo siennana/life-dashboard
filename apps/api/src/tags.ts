@@ -1,5 +1,5 @@
 import { asc, eq, and, sql } from "drizzle-orm";
-import { tagRules, tags, type Db } from "@life/db";
+import { eventTags, tagRules, tags, type Db } from "@life/db";
 import { TAG_COLORS, type Tag, type TagUpdateInput } from "@life/shared";
 import { merchantKeyOf, normalizeMerchant } from "./spending";
 
@@ -14,13 +14,20 @@ const toTag = (r: typeof tags.$inferSelect): Tag => ({
 });
 
 export async function listTags(db: Db): Promise<Tag[]> {
-  const [rows, rules] = await Promise.all([
+  const [rows, rules, eventRows] = await Promise.all([
     db.select().from(tags).orderBy(asc(tags.name)),
     db.select({ tagId: tagRules.tagId }).from(tagRules),
+    db.select({ tagId: eventTags.tagId }).from(eventTags),
   ]);
   const counts = new Map<number, number>();
   for (const r of rules) counts.set(r.tagId, (counts.get(r.tagId) ?? 0) + 1);
-  return rows.map((r) => ({ ...toTag(r), merchants: counts.get(r.id) ?? 0 }));
+  const eventCounts = new Map<number, number>();
+  for (const r of eventRows) eventCounts.set(r.tagId, (eventCounts.get(r.tagId) ?? 0) + 1);
+  return rows.map((r) => ({
+    ...toTag(r),
+    merchants: counts.get(r.id) ?? 0,
+    events: eventCounts.get(r.id) ?? 0,
+  }));
 }
 
 // Create by name; re-creating an existing name returns the existing tag
@@ -73,4 +80,40 @@ export async function toggleTagMerchant(
   if (deleted.length > 0) return { tagged: false };
   await db.insert(tagRules).values({ tagId, merchant, merchantKey });
   return { tagged: true };
+}
+
+// Flip a tag on/off for one calendar event (the event context menu's
+// checkboxes). Keyed on the event's CalDAV externalId - per occurrence, not
+// per series - because that's the only handle the 5-min sync cycle preserves.
+export async function toggleTagEvent(
+  db: Db,
+  tagId: number,
+  externalId: string,
+): Promise<{ tagged: boolean } | null> {
+  const tag = (await db.select().from(tags).where(eq(tags.id, tagId)))[0];
+  if (!tag) return null;
+  const deleted = await db
+    .delete(eventTags)
+    .where(and(eq(eventTags.tagId, tagId), eq(eventTags.eventExternalId, externalId)))
+    .returning();
+  if (deleted.length > 0) return { tagged: false };
+  await db.insert(eventTags).values({ tagId, eventExternalId: externalId });
+  return { tagged: true };
+}
+
+// All event-tag assignments grouped by event externalId, for decorating the
+// calendar events response. Tags sorted by name for stable chip order.
+export async function eventTagsByExternalId(db: Db): Promise<Map<string, Tag[]>> {
+  const rows = await db
+    .select({ externalId: eventTags.eventExternalId, tag: tags })
+    .from(eventTags)
+    .innerJoin(tags, eq(eventTags.tagId, tags.id))
+    .orderBy(asc(tags.name));
+  const map = new Map<string, Tag[]>();
+  for (const r of rows) {
+    const list = map.get(r.externalId) ?? [];
+    list.push(toTag(r.tag));
+    map.set(r.externalId, list);
+  }
+  return map;
 }

@@ -349,6 +349,10 @@ export const deleteTag = (id: number) => apiDelete(`/api/tags/${id}`);
 export const toggleTagMerchant = (tagId: number, merchant: string) =>
   apiPost<{ tagged: boolean }>(`/api/tags/${tagId}/toggle`, { merchant });
 
+// Flip a tag on/off for one calendar event (the event context menu).
+export const toggleTagEvent = (tagId: number, externalId: string) =>
+  apiPost<{ tagged: boolean }>(`/api/tags/${tagId}/toggle-event`, { externalId });
+
 export const createPlaidLinkToken = (mode: PlaidLinkMode = "transactions") =>
   apiPost<{ link_token: string }>("/api/plaid/link-token", { mode });
 

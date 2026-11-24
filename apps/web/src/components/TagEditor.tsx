@@ -121,9 +121,18 @@ export function TagEditor() {
               <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-red-900/60 bg-red-500/5 px-2 py-1.5 text-xs">
                 <span className="min-w-0 flex-1 text-zinc-300">
                   Delete <span className="font-medium text-zinc-100">#{tag.name}</span>
-                  {(tag.merchants ?? 0) > 0
-                    ? ` and remove it from ${tag.merchants} merchant${tag.merchants === 1 ? "" : "s"}?`
-                    : "?"}
+                  {(() => {
+                    // Blast radius: merchants (tag rules) + calendar events.
+                    const parts = [
+                      (tag.merchants ?? 0) > 0
+                        ? `${tag.merchants} merchant${tag.merchants === 1 ? "" : "s"}`
+                        : null,
+                      (tag.events ?? 0) > 0
+                        ? `${tag.events} event${tag.events === 1 ? "" : "s"}`
+                        : null,
+                    ].filter(Boolean);
+                    return parts.length > 0 ? ` and remove it from ${parts.join(" + ")}?` : "?";
+                  })()}
                 </span>
                 <button
                   type="button"

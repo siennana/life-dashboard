@@ -43,6 +43,13 @@
       "when": 1786371631991,
       "tag": "0005_daily_forge",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795483667063,
+      "tag": "0006_overjoyed_blade",
+      "breakpoints": true
     }
   ]
 }

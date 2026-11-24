@@ -1,3 +1,4 @@
+import type { CalendarEvent } from "@life/shared";
 import { ScheduleTimeline } from "./ScheduleTimeline";
 
 // Expanded-day schedule: a single-column ScheduleTimeline (the same component
@@ -8,11 +9,15 @@ export function DaySchedule({
   showLabel = true,
   showExercise,
   hiddenCalendars,
+  hiddenEventTags,
+  onEventContextMenu,
 }: {
   date: string;
   showLabel?: boolean;
   showExercise?: boolean;
   hiddenCalendars?: ReadonlySet<string>;
+  hiddenEventTags?: ReadonlySet<number>;
+  onEventContextMenu?: (e: React.MouseEvent, event: CalendarEvent) => void;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -27,6 +32,8 @@ export function DaySchedule({
         className="min-h-16 flex-1"
         showExercise={showExercise}
         hiddenCalendars={hiddenCalendars}
+        hiddenEventTags={hiddenEventTags}
+        onEventContextMenu={onEventContextMenu}
       />
     </div>
   );

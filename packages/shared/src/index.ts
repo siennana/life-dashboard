@@ -212,15 +212,19 @@ export const booksResponseSchema = z.object({
 export type BooksResponse = z.infer<typeof booksResponseSchema>;
 
 // Calendar — events pulled read-only from iCloud (CalDAV). Times are ISO
-// strings; all-day events carry allDay=true.
+// strings; all-day events carry allDay=true. `externalId` is the stable
+// CalDAV handle (uid, or uid:occurrenceISO for a recurring instance) that
+// event tags key on; `tags` are the user labels applied to this occurrence.
 export const calendarEventSchema = z.object({
   id: z.number(),
+  externalId: z.string(),
   title: z.string(),
   start: z.string(),
   end: z.string().nullable(),
   allDay: z.boolean(),
   calendar: z.string().nullable(),
   location: z.string().nullable(),
+  tags: z.array(z.lazy(() => tagSchema)),
 });
 export type CalendarEvent = z.infer<typeof calendarEventSchema>;
 
@@ -569,9 +573,11 @@ export const tagSchema = z.object({
   id: z.number(),
   name: z.string(),
   color: tagColorSchema,
-  // How many merchants carry the tag. Filled by GET /api/tags (the editor's
-  // delete confirmation states the blast radius); absent in embedded uses.
+  // How many merchants / calendar events carry the tag. Filled by GET
+  // /api/tags (the editor's delete confirmation states the blast radius);
+  // absent in embedded uses.
   merchants: z.number().optional(),
+  events: z.number().optional(),
 });
 export type Tag = z.infer<typeof tagSchema>;
 
@@ -594,6 +600,12 @@ export const tagToggleInputSchema = z.object({
   merchant: z.string().trim().min(1),
 });
 export type TagToggleInput = z.infer<typeof tagToggleInputSchema>;
+
+// Flip a tag on/off for one calendar event (keyed on its CalDAV externalId).
+export const eventTagToggleInputSchema = z.object({
+  externalId: z.string().trim().min(1),
+});
+export type EventTagToggleInput = z.infer<typeof eventTagToggleInputSchema>;
 
 // A merchant with the tags applied to it (the Bank page's Tagged merchants
 // widget + row-menu checkbox state, looked up by transaction merchantKey).
