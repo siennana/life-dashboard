@@ -23,6 +23,7 @@ export function DayLog({ date, showLabel = true }: { date: string; showLabel?: b
       // Refresh the page-level "last saved" stamp + the pencil datalet marks.
       queryClient.invalidateQueries({ queryKey: ["calendar-last-updated"] });
       queryClient.invalidateQueries({ queryKey: ["logged-days"] });
+      queryClient.invalidateQueries({ queryKey: ["day-search"] });
       setDirty(false);
     },
   });

@@ -29,6 +29,7 @@ import { useIsMobile } from "../lib/useIsMobile";
 import { DayForm } from "../components/DayForm";
 import { DayLog } from "../components/DayLog";
 import { WeekSchedule } from "../components/WeekSchedule";
+import { JournalSearch } from "../components/JournalSearch";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -67,6 +68,13 @@ const dayTitle = (key: string) => {
   const [y, m, d] = key.split("-").map(Number);
   return `${d} ${MONTHS[m - 1]} ${y}`;
 };
+
+// Full weekday name for an expanded day's header ("Monday").
+const weekdayName = (key: string) => {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "long" });
+};
+const weekdayLabelClass = "text-xs font-medium text-zinc-400";
 
 // Gay-view cell tooltip: the label plus the receipts ("+1 homebody", ...).
 const gayTitle = (g: GaynessDay) =>
@@ -525,6 +533,9 @@ export function CalendarPage() {
   const [showLoggedMark, setShowLoggedMark] = useState(stored.showLoggedMark ?? true);
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
+  // Journal search field + its results dropdown; clicks inside it must not
+  // count as "outside the grid" (which would collapse the open day).
+  const searchRef = useRef<HTMLDivElement>(null);
 
   // Autosave every filter change (cheap; runs once per toggle).
   useEffect(() => {
@@ -664,6 +675,7 @@ export function CalendarPage() {
     const onDown = (e: PointerEvent) => {
       if (menu || eventMenuOpen) return;
       if (gridRef.current?.contains(e.target as Node)) return;
+      if (searchRef.current?.contains(e.target as Node)) return;
       collapseAll();
     };
     document.addEventListener("pointerdown", onDown);
@@ -724,6 +736,20 @@ export function CalendarPage() {
     // Gay view is cells-only: no day/week expansion, just rainbows.
     if (gayView) return;
     if (!suppressClickRef.current) cellClick(wi, key);
+  }
+
+  // Jump to a date from outside the grid (journal search): switch the visible
+  // month to it and open that day on its own. The week index is computed from
+  // the target month's grid, not the current `weeks`, since both change in
+  // the same render.
+  function jumpToDay(key: string) {
+    const [y, m] = key.split("-").map(Number);
+    const idx = buildGrid(y, m - 1).findIndex((c) => cellKey(c) === key);
+    if (idx < 0) return;
+    setYear(y);
+    setMonth(m - 1);
+    if (gayView) setGayView(false);
+    openDaySingle(Math.floor(idx / 7), key);
   }
 
   // Press-drag day selection across a week. Mouse: press and drag. Touch:
@@ -1133,11 +1159,11 @@ export function CalendarPage() {
           {view === "day" && expandedDay && (
             <div className="flex flex-col gap-2 p-3">
               <div className="flex items-center justify-between gap-1">
-                <span
-                  title={dayTitle(expandedDay)}
-                  className={dayNum(expandedDay, expandedCell?.inMonth ?? true, false)}
-                >
-                  {Number(expandedDay.slice(8))}
+                <span className="flex items-center gap-1.5" title={dayTitle(expandedDay)}>
+                  <span className={weekdayLabelClass}>{weekdayName(expandedDay)}</span>
+                  <span className={dayNum(expandedDay, expandedCell?.inMonth ?? true, false)}>
+                    {Number(expandedDay.slice(8))}
+                  </span>
                 </span>
                 <span className="flex min-w-0 items-center gap-1.5">
                   <DataletBadges
@@ -1172,7 +1198,9 @@ export function CalendarPage() {
           Last saved {lastSavedText}
         </div>
       )}
-      <div className={`${lastSavedText ? "mt-0.5" : "mt-1 md:mt-6"} flex items-center gap-1`}>
+      <div
+        className={`${lastSavedText ? "mt-0.5" : "mt-1 md:mt-6"} flex flex-wrap items-center gap-1`}
+      >
         <button
           type="button"
           aria-label="Previous month"
@@ -1370,10 +1398,15 @@ export function CalendarPage() {
             setMonth(now.getMonth());
             collapseAll();
           }}
-          className={`ml-auto ${todayClass}`}
+          className={`ml-auto md:order-last md:ml-0 ${todayClass}`}
         >
           Today
         </button>
+        {/* Journal search: full-width second line on mobile; on desktop it
+            fills all the room between the view toggle and Today. */}
+        <div ref={searchRef} className="mt-1 min-w-0 basis-full md:ml-1 md:mt-0 md:flex-1 md:basis-0">
+          <JournalSearch onSelect={jumpToDay} />
+        </div>
       </div>
 
       {exercises.isError && (
@@ -1575,9 +1608,10 @@ export function CalendarPage() {
                               aria-label={`Collapse ${key}`}
                               title={dayTitle(key)}
                               onClick={collapseExpandedDay}
-                              className={`${dayNumberClass} hover:opacity-80`}
+                              className="flex shrink-0 items-center gap-1.5 hover:opacity-80"
                             >
-                              {cell.day}
+                              <span className={weekdayLabelClass}>{weekdayName(key)}</span>
+                              <span className={dayNumberClass}>{cell.day}</span>
                             </button>
                             {/* Order: datalets then dayBadges (weather, cashflow),
                                 so cashflow lands on the far right. */}

@@ -12,7 +12,7 @@ import { syncICloud } from "./connectors/icloud";
 import { getWeather } from "./weather";
 import { listPeriodDays, togglePeriodDay } from "./period";
 import { buildGaynessScores } from "./gayness";
-import { getDayLog, getLastUpdated, getLoggedDays, saveDayLog } from "./calendarDay";
+import { getDayLog, getLastUpdated, getLoggedDays, saveDayLog, searchDayLogs } from "./calendarDay";
 import {
   buildDailyCashflow,
   buildDayTransactions,
@@ -720,6 +720,16 @@ app.get("/api/calendar/last-updated", async (_req, reply) => {
 app.get("/api/calendar/logged-days", async (_req, reply) => {
   if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
   return getLoggedDays(db);
+});
+
+// Journal search: days whose log contains ?q (case-insensitive), with a
+// snippet around the first match. Empty/blank q returns no hits.
+app.get("/api/calendar/search", async (req, reply) => {
+  if (!db) return reply.code(503).send({ error: "database not configured: DATABASE_URL is not set" });
+  const { q } = req.query as { q?: string };
+  if (typeof q !== "string") return reply.code(400).send({ error: "missing q" });
+  if (q.length > 200) return reply.code(400).send({ error: "q too long (max 200 chars)" });
+  return searchDayLogs(db, q);
 });
 
 // Calendar day detail: the free-text log for a day's expanded-cell form.

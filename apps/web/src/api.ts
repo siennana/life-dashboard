@@ -17,6 +17,7 @@ import type {
   LoanAssignInput,
   LoanInput,
   LoansResponse,
+  DaySearchResponse,
   LoggedDaysResponse,
   PeriodsResponse,
   PeriodToggleInput,
@@ -296,6 +297,9 @@ export const getCalendarLastUpdated = () =>
   apiFetch<CalendarLastUpdated>("/api/calendar/last-updated");
 
 export const getLoggedDays = () => apiFetch<LoggedDaysResponse>("/api/calendar/logged-days");
+
+export const searchDayLogs = (q: string) =>
+  apiFetch<DaySearchResponse>(`/api/calendar/search?q=${encodeURIComponent(q)}`);
 
 export const getSpending = (month?: string) =>
   apiFetch<SpendingDashboard>(`/api/finance/spending${month ? `?month=${month}` : ""}`);

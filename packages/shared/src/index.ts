@@ -795,3 +795,21 @@ export const saveDayLogInputSchema = z.object({
   log: z.string().max(20000),
 });
 export type SaveDayLogInput = z.infer<typeof saveDayLogInputSchema>;
+
+// Journal search: days whose log contains the query (case-insensitive). One
+// hit per day — the first occurrence — split around the match so the UI can
+// bold exactly the matched substring.
+export const daySearchHitSchema = z.object({
+  date: z.string(), // YYYY-MM-DD
+  before: z.string(), // context left of the match (may start mid-word)
+  match: z.string(), // the matched substring as it appears in the log
+  after: z.string(), // context right of the match
+  matches: z.number().int(), // total occurrences in that day's log
+});
+export type DaySearchHit = z.infer<typeof daySearchHitSchema>;
+
+export const daySearchResponseSchema = z.object({
+  query: z.string(),
+  hits: z.array(daySearchHitSchema), // newest day first
+});
+export type DaySearchResponse = z.infer<typeof daySearchResponseSchema>;
