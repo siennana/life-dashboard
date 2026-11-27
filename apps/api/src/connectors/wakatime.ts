@@ -1,7 +1,9 @@
 import { eq } from "drizzle-orm";
 import { metrics, syncRuns, type Db } from "@life/db";
 
-// WakaTime coding time, read-only. Free accounts only expose ~14 days of
+// WakaTime coding time, read-only. Auth is a personal OAuth token
+// (wakatime.com/oauth) sent as a Bearer header - API keys are plugin-only
+// and get 403 on the summaries endpoint. Free accounts only expose ~14 days of
 // detail through the API, so each sync re-pulls that trailing window into
 // `metrics` (source "wakatime", name "coding_seconds", one row per day,
 // last-write-wins - today's row climbs during the day) and the DB accumulates
@@ -23,7 +25,7 @@ const top = (list: { name: string; total_seconds: number }[] | undefined, n: num
     .slice(0, n)
     .map((x) => ({ name: x.name, seconds: Math.round(x.total_seconds) }));
 
-export async function syncWakatime(db: Db, apiKey: string) {
+export async function syncWakatime(db: Db, token: string) {
   const run = (await db.insert(syncRuns).values({ source: "wakatime" }).returning())[0]!;
   try {
     const end = new Date();
@@ -31,7 +33,7 @@ export async function syncWakatime(db: Db, apiKey: string) {
     const fmt = (d: Date) => d.toLocaleDateString("en-CA");
     const url = `https://api.wakatime.com/api/v1/users/current/summaries?start=${fmt(start)}&end=${fmt(end)}`;
     const res = await fetch(url, {
-      headers: { Authorization: `Basic ${Buffer.from(apiKey).toString("base64")}` },
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
